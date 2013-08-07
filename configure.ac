@@ -10,7 +10,7 @@ AC_INIT([GStreamer Base Plug-ins],[1.1.3.1],[http://bugzilla.gnome.org/enter_bug
 AG_GST_INIT
 
 dnl initialize automake
-AM_INIT_AUTOMAKE([-Wno-portability 1.11 no-dist-gzip dist-xz tar-ustar])
+AM_INIT_AUTOMAKE([-Wno-portability 1.11 no-dist-gzip dist-xz tar-ustar subdir-objects])
 
 dnl define PACKAGE_VERSION_* variables
 AS_VERSION
@@ -829,6 +829,8 @@ GST_PLUGIN_LDFLAGS="-module -avoid-version -export-symbols-regex '^[_]*gst_plugi
 AC_SUBST(GST_PLUGIN_LDFLAGS)
 
 dnl *** output files ***
+
+$MKDIR_P tests/check/orc
 
 AC_CONFIG_FILES(
 Makefile
