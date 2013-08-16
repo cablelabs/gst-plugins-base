@@ -26,6 +26,7 @@
 
 #include <stdlib.h>             /* atoi() */
 #include <string.h>
+#include <gst/tag/tag.h>
 
 #include "gstssaparse.h"
 
@@ -343,6 +344,8 @@ gst_ssa_parse_chain (GstPad * sinkpad, GstObject * parent, GstBuffer * buf)
     tags = gst_tag_list_new_empty ();
     gst_tag_list_add (tags, GST_TAG_MERGE_APPEND, GST_TAG_SUBTITLE_CODEC,
         "SubStation Alpha", NULL);
+    gst_tag_list_add (tags, GST_TAG_MERGE_APPEND, GST_TAG_TRACK_KIND,
+        "subtitles", NULL);
     gst_pad_push_event (parse->srcpad, gst_event_new_tag (tags));
     parse->send_tags = FALSE;
   }

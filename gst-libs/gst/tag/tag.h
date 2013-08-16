@@ -333,6 +333,48 @@ G_BEGIN_DECLS
  */
 #define GST_TAG_IMAGE_VERTICAL_PPI           "image-vertical-ppi"
 
+/**
+ * GST_TAG_TRACK_KIND:
+ *
+ * The kind of track. (string)
+ *
+ * This tag has a predefined set of allowed values.
+ *
+ * For audio:
+ *
+ *   "alternative"
+ *   "description"
+ *   "main"
+ *   "main-desc"
+ *   "translation"
+ *   "commentary"
+ *   "chapters"
+ *   "metadata"
+ *   ""
+ *
+ * For text:
+ *
+ *   "subtitles"
+ *   "captions"
+ *   "descriptions"
+ *   "chapters"
+ *   "metadata"
+ *
+ * For video:
+ *   "alternative"
+ *   "captions"
+ *   "main"
+ *   "sign"
+ *   "subtitles"
+ *   "commentary"
+ *   "chapters"
+ *   "metadata"
+ *   ""
+ *
+ * See: http://www.w3.org/TR/2012/CR-html5-20121217/embedded-content-0.html#dom-audiotrack-kind
+ *      http://www.w3.org/TR/2012/CR-html5-20121217/embedded-content-0.html#text-track-kind
+ */
+#define GST_TAG_TRACK_KIND            "kind"
 
 /* additional information for image tags */
 
