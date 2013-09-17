@@ -1205,6 +1205,7 @@ gst_ogg_map_add_fisbone (GstOggStream * pad, GstOggStream * skel_pad,
     return FALSE;
   }
 
+  /* See: https://wiki.xiph.org/Ogg_Skeleton_4#Ogg_Skeleton_version_4.0_Format_Specification */
   /* skip "fisbone\0" + headers offset + serialno + num headers */
   data += 8 + 4 + 4 + 4;
 
@@ -1236,6 +1237,62 @@ gst_ogg_map_add_fisbone (GstOggStream * pad, GstOggStream * skel_pad,
       " preroll: %" G_GUINT32_FORMAT " granuleshift: %d)",
       GST_TIME_ARGS (start_time),
       pad->granulerate_n, pad->granulerate_d, pad->preroll, pad->granuleshift);
+
+  for (int start = 32, end; start < size; start = end + 2) {
+    for (end = start; end < size - 1; ++end) {
+      if (data[end] == '\r' && data[end + 1] == '\n') {
+        gchar *header = g_strndup ((const gchar *) data + start, end - start);
+        gchar *seperator = strchr (header, ':');
+        if (seperator && seperator[1] == ' ') {
+          gchar *value = seperator + 2;
+          *seperator = 0;
+
+          /* see: https://wiki.xiph.org/SkeletonHeaders#Role */
+          if (!strcmp (header, "Role")) {
+            const gchar *kind = 0;
+            if (!strcmp (value, "audio/main") || !strcmp (value, "video/main")) {
+              kind = "main";
+            } else if (!strcmp (value, "audio/alternate")
+                || !strcmp (value, "video/alternate")) {
+              kind = "alternative";
+            } else if (!strcmp (value, "audio/audiodesc")) {
+              kind = "description";
+            } else if (!strcmp (value, "text/caption")) {
+              kind = "captions";
+            } else if (!strcmp (value, "text/chapters")) {
+              kind = "chapters";
+            } else if (!strcmp (value, "text/metadata")) {
+              kind = "metadata";
+            } else if (!strcmp (value, "video/sign")) {
+              kind = "sign";
+            } else if (!strcmp (value, "text/subtitle")) {
+              kind = "subtitles";
+            } else if (!strcmp (value, "audio/dub")) {
+              kind = "translation";
+            } else if (!strcmp (value, "text/textaudiodesc")) {
+              kind = "descriptions";
+            } else {
+              GST_INFO ("role %s does not match any HTML5 track kind mapping",
+                  value);
+            }
+            if (kind) {
+              GST_INFO ("mapped ogg role %s to track kind %s\n", value, kind);
+              if (!pad->taglist)
+                pad->taglist = gst_tag_list_new_empty ();
+              gst_tag_list_add (pad->taglist, GST_TAG_MERGE_REPLACE,
+                  GST_TAG_TRACK_KIND, kind, NULL);
+            }
+          }
+        } else {
+          GST_WARNING ("invalid skeleton header found: %s", header);
+        }
+        g_free (header);
+
+        start = end;
+        break;
+      }
+    }
+  }
 
   if (p_start_time)
     *p_start_time = start_time;
