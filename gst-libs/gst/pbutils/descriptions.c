@@ -269,6 +269,7 @@ static const FormatInfo formats[] = {
   {"image/vnd.wap.wbmp", "Wireless Bitmap", FLAG_IMAGE, "wbmp"},
 
   /* subtitle formats with static descriptions */
+  {"text/x-raw", N_("Timed Text"), FLAG_SUB, ""},
   {"application/x-ssa", "SubStation Alpha", FLAG_SUB, ""},
   {"application/x-ass", "Advanced SubStation Alpha", FLAG_SUB, ""},
   /* FIXME: add variant field to typefinder? */
@@ -319,7 +320,8 @@ static const FormatInfo formats[] = {
   {"video/x-raw", NULL, FLAG_VIDEO, ""},
   {"video/x-svq", NULL, FLAG_VIDEO, ""},
   {"video/x-wmv", NULL, FLAG_VIDEO, ""},
-  {"video/x-xan", NULL, FLAG_VIDEO, ""}
+  {"video/x-xan", NULL, FLAG_VIDEO, ""},
+  {"video/x-tscc", NULL, FLAG_VIDEO, ""}
 };
 
 /* returns static descriptions and dynamic ones (such as video/x-raw),
@@ -354,18 +356,11 @@ format_info_get_desc (const FormatInfo * info, const GstCaps * caps)
     if (GST_VIDEO_FORMAT_INFO_IS_GRAY (finfo)) {
       ret = g_strdup (_("Uncompressed gray"));
     } else if (GST_VIDEO_FORMAT_INFO_IS_YUV (finfo)) {
-      const gchar *layout;
       const gchar *subs;
-      gint w_sub, h_sub;
+      gint w_sub, h_sub, n_semi;
 
       w_sub = GST_VIDEO_FORMAT_INFO_W_SUB (finfo, 1);
       h_sub = GST_VIDEO_FORMAT_INFO_H_SUB (finfo, 1);
-
-      if (GST_VIDEO_FORMAT_INFO_N_PLANES (finfo) == 1) {
-        layout = "planar";
-      } else {
-        layout = "packed";
-      }
 
       if (w_sub == 1 && h_sub == 1) {
         subs = "4:4:4";
@@ -378,7 +373,16 @@ format_info_get_desc (const FormatInfo * info, const GstCaps * caps)
       } else {
         subs = "";
       }
-      ret = g_strdup_printf (_("Uncompressed %s YUV %s"), layout, subs);
+
+      n_semi = GST_VIDEO_FORMAT_INFO_HAS_ALPHA (finfo) ? 3 : 2;
+
+      if (GST_VIDEO_FORMAT_INFO_N_PLANES (finfo) == 1) {
+        ret = g_strdup_printf (_("Uncompressed packed YUV %s"), subs);
+      } else if (GST_VIDEO_FORMAT_INFO_N_PLANES (finfo) == n_semi) {
+        ret = g_strdup_printf (_("Uncompressed semi-planar YUV %s"), subs);
+      } else {
+        ret = g_strdup_printf (_("Uncompressed planar YUV %s"), subs);
+      }
     } else if (GST_VIDEO_FORMAT_INFO_IS_RGB (finfo)) {
       gboolean alpha, palette;
       gint bits;
@@ -387,8 +391,13 @@ format_info_get_desc (const FormatInfo * info, const GstCaps * caps)
       palette = GST_VIDEO_FORMAT_INFO_HAS_PALETTE (finfo);
       bits = GST_VIDEO_FORMAT_INFO_BITS (finfo);
 
-      ret = g_strdup_printf (_("Uncompressed %s%d-bit %s"),
-          palette ? "palettized " : "", bits, alpha ? "RGBA" : "RGB");
+      if (palette) {
+        ret = g_strdup_printf (_("Uncompressed palettized %d-bit %s"),
+            bits, alpha ? "RGBA" : "RGB");
+      } else {
+        ret = g_strdup_printf (_("Uncompressed %d-bit %s"),
+            bits, alpha ? "RGBA" : "RGB");
+      }
     } else {
       ret = g_strdup (_("Uncompressed video"));
     }
@@ -496,13 +505,20 @@ format_info_get_desc (const FormatInfo * info, const GstCaps * caps)
     return g_strdup ("Windows Media Audio");
   } else if (strcmp (info->type, "video/x-wmv") == 0) {
     gint ver = 0;
+    const gchar *str;
 
     gst_structure_get_int (s, "wmvversion", &ver);
+    str = gst_structure_get_string (s, "format");
+
     switch (ver) {
       case 1:
       case 2:
       case 3:
-        return g_strdup_printf ("Windows Media Video %d", ver + 6);
+        if (str && strncmp (str, "MSS", 3)) {
+          return g_strdup_printf ("Windows Media Video %d Screen", ver + 6);
+        } else {
+          return g_strdup_printf ("Windows Media Video %d", ver + 6);
+        }
       default:
         break;
     }
@@ -595,6 +611,8 @@ format_info_get_desc (const FormatInfo * info, const GstCaps * caps)
         }
         GST_WARNING ("Unexpected MPEG-1 layer in %" GST_PTR_FORMAT, caps);
         return g_strdup ("MPEG-1 Audio");
+      case 2:
+        return g_strdup ("MPEG-2 AAC");
       case 4:
         return g_strdup ("MPEG-4 AAC");
       default:
@@ -669,6 +687,19 @@ format_info_get_desc (const FormatInfo * info, const GstCaps * caps)
 
     return g_strdup_printf (_("Raw %d-bit %s audio"), depth,
         is_float ? "floating-point" : "PCM");
+  } else if (strcmp (info->type, "video/x-tscc") == 0) {
+    gint version;
+    gst_structure_get_int (s, "tsccversion", &version);
+    switch (version) {
+      case 1:
+        return g_strdup ("TechSmith Screen Capture 1");
+      case 2:
+        return g_strdup ("TechSmith Screen Capture 2");
+      default:
+        break;
+    }
+    GST_WARNING ("Unexpected version in %" GST_PTR_FORMAT, caps);
+    return g_strdup ("TechSmith Screen Capture");
   }
   return NULL;
 }

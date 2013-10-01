@@ -1,8 +1,8 @@
 
-Release notes for GStreamer Base Plugins 1.1.4
+Release notes for GStreamer Base Plugins 1.2.0
 
 
-The GStreamer team is proud to announce a new bug-fix release
+The GStreamer team is proud to announce a new feature release
 in the 1.x stable series of the
 core of the GStreamer streaming media framework.
 
@@ -60,25 +60,10 @@ contains a set of codecs plugins based on libav (formerly gst-ffmpeg)
 
 Bugs fixed in this release
      
-      * 703378 : pbutils: Allow getting descriptions for unfixed caps
-      * 660195 : GstDiscoverer: signals " discovered " and " finished " are only emitted in async mode
-      * 553520 : tools: add gst-play utility that wraps playbin for testing purposes
-      * 691462 : typefind: ADTS/AAC wrongly detected as MP2
-      * 695889 : libs: many headers don't compile by themselves
-      * 703405 : parse: Allow creating plain elements instead of single-element bins
-      * 703669 : gst_rtcp_packet_fb_set_fci_length sets an incorrect buffer size.
-      * 704929 : Prevent oggdemux from seeking a lot when the SEQUENTIAL scheduler flag is set
-      * 705109 : audiodecoder/videodecoder: Needs to flush taglist on reception of stream-start
-      * 705144 : mpegvideoparse: support field encoding for interlaced video
-      * 705157 : tests: playbin_complex check fails during make check
-      * 705369 : playbin: fix get-tags actions
-      * 705555 : streamsynchronizer: should forward queries
-      * 705826 : typefinding: add typefinder for webp imageformat
-      * 705828 : videodecoder/videoencoder: Behaviour changes in ::reset() vfunc
-      * 706061 : typefind: improved and extended typefinder for module music
-      * 706569 : regression: playbin: chained oggs don't work any more
-      * 706680 : dmabuf: fix mmap counting
-      * 706885 : videoencoder: Fix forwarding of GstForceKeyUnit events
+      * 708667 : rtspconnection: leaks file descriptors/child sources
+      * 708372 : dmabuf: sys/mman.h: No such file or directory
+      * 708590 : adder: Should send its segment before checking for eos
+      * 708606 : video-frame: offsets are not copied from metadata
 
 ==== Download ====
 
@@ -115,24 +100,10 @@ subscribe to the gstreamer-devel list.
         
 Contributors to this release
     
-      * Alessandro Decina
-      * Andoni Morales Alastruey
-      * Arnaud Vrac
-      * Carlos Rafael Giani
-      * David Schleef
       * Edward Hervey
-      * Jie Yang
-      * Jonathan Matthew
-      * Lubosz Sarnecki
-      * Matthieu Bouron
-      * Michael Olbrich
-      * Olivier Crête
-      * Rico Tzschichholz
+      * Mathieu Duponchelle
+      * Ognyan Tonchev
       * Sebastian Dröge
-      * Sjoerd Simons
-      * Sreerenj Balachandran
-      * Thibault Saunier
       * Tim-Philipp Müller
       * Wim Taymans
-      * Youness Alaoui
  
