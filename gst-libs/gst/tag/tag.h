@@ -96,6 +96,29 @@ G_BEGIN_DECLS
  */
 #define GST_TAG_MUSICAL_KEY                   "musical-key"
 
+/**
+ * GST_TAG_TRACK_KIND:
+ *
+ * The HTML5 track kind. (string)
+ *
+ * The allowed values are:
+ *   "alternative"
+ *   "captions"
+ *   "chapters"
+ *   "commentary"
+ *   "description"
+ *   "descriptions"
+ *   "main"
+ *   "main-desc"
+ *   "metadata"
+ *   "sign"
+ *   "subtitles"
+ *   "translation"
+ *
+ * See: http://www.w3.org/TR/2012/CR-html5-20121217/embedded-content-0.html#dom-audiotrack-kind
+ *      http://www.w3.org/TR/2012/CR-html5-20121217/embedded-content-0.html#text-track-kind
+ */
+#define GST_TAG_TRACK_KIND "track-kind"
 
 /* CDDA tags */
 
