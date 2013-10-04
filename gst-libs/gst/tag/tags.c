@@ -199,7 +199,7 @@ gst_tag_register_tags_internal (gpointer unused)
           "sound starts"), gst_tag_merge_use_first);
 
   gst_tag_register_static (GST_TAG_TRACK_KIND, GST_TAG_FLAG_META,
-      G_TYPE_ENUM, _("track kind"), _("The HTML5 track kind"), NULL);
+      G_TYPE_STRING, _("track kind"), _("The HTML5 track kind"), NULL);
 
   return NULL;
 }

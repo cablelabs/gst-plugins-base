@@ -99,69 +99,26 @@ G_BEGIN_DECLS
 /**
  * GST_TAG_TRACK_KIND:
  *
- * The HTML5 track kind. (enum)
- * See: http://www.w3.org/TR/2012/CR-html5-20121217/embedded-content-0.html#dom-audiotrack-kind
- *      http://www.w3.org/TR/2012/CR-html5-20121217/embedded-content-0.html#text-track-kind
- */
-#define GST_TAG_TRACK_KIND            "track-kind"
-/**
- * GstTagTrackKind: The possible types for GST_TAG_TRACK_KIND. Descriptions are
- * taken from the HTML5 spec.
+ * The HTML5 track kind. (string)
+ *
+ * The allowed values are:
+ *   "alternative"
+ *   "captions"
+ *   "chapters"
+ *   "commentary"
+ *   "description"
+ *   "descriptions"
+ *   "main"
+ *   "main-desc"
+ *   "metadata"
+ *   "sign"
+ *   "subtitles"
+ *   "translation"
  *
  * See: http://www.w3.org/TR/2012/CR-html5-20121217/embedded-content-0.html#dom-audiotrack-kind
  *      http://www.w3.org/TR/2012/CR-html5-20121217/embedded-content-0.html#text-track-kind
- *
- * @GST_TAG_TRACK_KIND_NONE: No explicit kind, or the kind given by the track's
- *     metadata is not recognised by the user agent. 
- * @GST_TAG_TRACK_KIND_ALTERNATIVE: A possible alternative to the main track,
- *     e.g. a different take of a song (audio), or a different angle (video).
- * @GST_TAG_TRACK_KIND_CAPTIONS: A version of the main video track with
- *     captions burnt in (video), or transcription or translation of the
- *     dialogue, sound effects, relevant musical cues, and other relevant audio
- *     information, suitable for when sound is unavailable or not clearly
- *     audible (e.g. because it is muted, drowned-out by ambient noise, or
- *     because the user is deaf). Overlaid on the video; labeled as appropriate
- *     for the hard-of-hearing. 
- * @GST_TAG_TRACK_KIND_CHAPTERS: Chapter titles, intended to be used for
- *     navigating the media resource. Displayed as an interactive (potentially
- *     nested) list in the user agent's interface. 
- * @GST_TAG_TRACK_KIND_COMMENTARY: Commentary on the primary audio or video
- *     track, e.g. a director's commentary. 
- * @GST_TAG_TRACK_KIND_DESCRIPTION: An audio description of a video track.
- * @GST_TAG_TRACK_KIND_DESCRIPTIONS: Textual descriptions of the video
- *     component of the media resource, intended for audio synthesis when the
- *     visual component is obscured, unavailable, or not usable (e.g. because
- *     the user is interacting with the application without a screen while
- *     driving, or because the user is blind). Synthesized as audio. 
- * @GST_TAG_TRACK_KIND_MAIN: The primary audio or video track.
- * @GST_TAG_TRACK_KIND_MAIN_DESC: The primary audio track, mixed with audio
- *     descriptions.
- * @GST_TAG_TRACK_KIND_METADATA: Tracks intended for use from script. Not
- *     displayed by the user agent. 
- * @GST_TAG_TRACK_KIND_SIGN: A sign-language interpretation of an audio track.
- * @GST_TAG_TRACK_KIND_SUBTITLES: A version of the main video track with
- *     subtitles burnt in or transcription or translation of the dialogue,
- *     suitable for when the sound is available but not understood (e.g.
- *     because the user does not understand the language of the media
- *     resource's audio track). Overlaid on the video.  
- * @GST_TAG_TRACK_KIND_TRANSLATION: A translated version of the main audio
- *     track.
  */
-typedef enum {
-  GST_TAG_TRACK_KIND_NONE = 0,
-  GST_TAG_TRACK_KIND_ALTERNATIVE,
-  GST_TAG_TRACK_KIND_CAPTIONS,
-  GST_TAG_TRACK_KIND_CHAPTERS,
-  GST_TAG_TRACK_KIND_COMMENTARY,
-  GST_TAG_TRACK_KIND_DESCRIPTION,
-  GST_TAG_TRACK_KIND_DESCRIPTIONS,
-  GST_TAG_TRACK_KIND_MAIN,
-  GST_TAG_TRACK_KIND_MAIN_DESC,
-  GST_TAG_TRACK_KIND_METADATA,
-  GST_TAG_TRACK_KIND_SIGN,
-  GST_TAG_TRACK_KIND_SUBTITLES,
-  GST_TAG_TRACK_KIND_TRANSLATION,
-} GstTagTrackKind;
+#define GST_TAG_TRACK_KIND "track-kind"
 
 /* CDDA tags */
 
