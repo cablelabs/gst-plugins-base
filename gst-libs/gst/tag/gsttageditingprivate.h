@@ -68,7 +68,7 @@ const gchar * __exif_tag_capturing_metering_mode_from_exif_value (gint value);
 gint __exif_tag_capturing_source_to_exif_value (const gchar * str);
 const gchar * __exif_tag_capturing_source_from_exif_value (gint value);
 
-#define ensure_exif_tags gst_tag_register_musicbrainz_tags
+#define ensure_exif_tags gst_tag_init
 
 G_END_DECLS
 

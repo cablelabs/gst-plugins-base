@@ -183,7 +183,7 @@ GST_START_TEST (test_musicbrainz_tag_registration)
 {
   GstTagList *list;
 
-  gst_tag_register_musicbrainz_tags ();
+  gst_tag_init ();
 
   list = gst_tag_list_new_empty ();
 
@@ -1101,7 +1101,7 @@ GST_START_TEST (test_xmp_tags_serialization_deserialization)
   GValue value = { 0 };
   GstDateTime *datetime;
 
-  gst_tag_register_musicbrainz_tags ();
+  gst_tag_init ();
 
   g_value_init (&value, G_TYPE_STRING);
   g_value_set_static_string (&value, "my string");
@@ -1392,7 +1392,7 @@ GST_START_TEST (test_exif_multiple_tags)
   GstDateTime *datetime;
   GValue value = { 0 };
 
-  gst_tag_register_musicbrainz_tags ();
+  gst_tag_init ();
 
   taglist = gst_tag_list_new (GST_TAG_ARTIST, "artist",
       GST_TAG_DEVICE_MANUFACTURER, "make",
@@ -1427,7 +1427,7 @@ GST_START_TEST (test_exif_tags_serialization_deserialization)
   GstMapInfo map;
   guint8 *data;
 
-  gst_tag_register_musicbrainz_tags ();
+  gst_tag_init ();
 
   g_value_init (&value, G_TYPE_STRING);
   g_value_set_static_string (&value, "my string");

@@ -125,7 +125,7 @@ gst_tag_from_vorbis_tag (const gchar * vorbis_tag)
 
   g_return_val_if_fail (vorbis_tag != NULL, NULL);
 
-  gst_tag_register_musicbrainz_tags ();
+  gst_tag_init ();
 
   real_vorbis_tag = g_ascii_strup (vorbis_tag, -1);
   while (tag_matches[i].gstreamer_tag != NULL) {
@@ -153,7 +153,7 @@ gst_tag_to_vorbis_tag (const gchar * gst_tag)
 
   g_return_val_if_fail (gst_tag != NULL, NULL);
 
-  gst_tag_register_musicbrainz_tags ();
+  gst_tag_init ();
 
   while (tag_matches[i].gstreamer_tag != NULL) {
     if (strcmp (gst_tag, tag_matches[i].gstreamer_tag) == 0) {

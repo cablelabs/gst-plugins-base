@@ -501,8 +501,11 @@ GstSample             * gst_tag_image_data_to_image_sample (const guint8   * ima
                                                             guint            image_data_len,
                                                             GstTagImageType  image_type);
 
-/* FIXME 0.11: get rid of this awkward register/init function, see tags.c */
+void                    gst_tag_init (void);
+
+#ifndef GST_DISABLE_DEPRECATED
 void                    gst_tag_register_musicbrainz_tags (void);
+#endif
 
 
 /* language tag related functions */

@@ -250,7 +250,7 @@ gst_audio_cd_src_class_init (GstAudioCdSrcClass * klass)
   sector_format = gst_format_register ("sector", "CD sector");
 
   /* register CDDA tags */
-  gst_tag_register_musicbrainz_tags ();
+  gst_tag_init ();
 
 #if 0
   ///// FIXME: what type to use here? ///////

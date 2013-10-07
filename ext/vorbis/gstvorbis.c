@@ -61,7 +61,7 @@ plugin_init (GstPlugin * plugin)
   GST_DEBUG_CATEGORY_INIT (vorbistag_debug, "vorbistag", 0,
       "vorbis tagging element");
 
-  gst_tag_register_musicbrainz_tags ();
+  gst_tag_init ();
 
   return TRUE;
 }

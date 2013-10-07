@@ -65,7 +65,7 @@ gst_tag_ensure_debug_category (void)
 #endif /* GST_DISABLE_GST_DEBUG */
 
 static gpointer
-gst_tag_register_tags_internal (gpointer unused)
+gst_tag_init_internal (gpointer unused)
 {
 #ifdef ENABLE_NLS
   GST_DEBUG ("binding text domain %s to locale dir %s", GETTEXT_PACKAGE,
@@ -201,25 +201,32 @@ gst_tag_register_tags_internal (gpointer unused)
   return NULL;
 }
 
-/* FIXME 0.11: rename this to gst_tag_init() or gst_tag_register_tags() or
- * even better: make tags auto-register themselves, either by defining them
+/* FIXME: make tags auto-register themselves, either by defining them
  * to a wrapper func that does the initing, or by adding tag factories so
  * that the core can load+register tags automatically when needed. */
 
 /**
- * gst_tag_register_musicbrainz_tags:
+ * gst_tag_init:
  *
- * Registers additional musicbrainz-specific tags with the GStreamer tag
+ * Registers additional format-specific tags with the GStreamer tag
  * system. Plugins and applications that use these tags should call this
  * function before using them. Can be called multiple times.
  */
 void
-gst_tag_register_musicbrainz_tags (void)
+gst_tag_init (void)
 {
   static GOnce mb_once = G_ONCE_INIT;
 
-  g_once (&mb_once, gst_tag_register_tags_internal, NULL);
+  g_once (&mb_once, gst_tag_init_internal, NULL);
 }
+
+#ifndef GST_DISABLE_DEPRECATED
+void
+gst_tag_register_musicbrainz_tags (void)
+{
+  gst_tag_init ();
+}
+#endif
 
 static void
 register_tag_image_type_enum (GType * id)
