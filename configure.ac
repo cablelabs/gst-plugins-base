@@ -5,7 +5,7 @@ dnl please read gstreamer/docs/random/autotools before changing this file
 dnl initialize autoconf
 dnl releases only do -Wall, git and prerelease does -Werror too
 dnl use a three digit version number for releases, and four for git/prerelease
-AC_INIT([GStreamer Base Plug-ins],[1.1.4.1],[http://bugzilla.gnome.org/enter_bug.cgi?product=GStreamer],[gst-plugins-base])
+AC_INIT([GStreamer Base Plug-ins],[1.3.0.1],[http://bugzilla.gnome.org/enter_bug.cgi?product=GStreamer],[gst-plugins-base])
 
 AG_GST_INIT
 
@@ -56,10 +56,10 @@ dnl      1.2.5 => 205
 dnl      1.10.9 (who knows) => 1009
 dnl
 dnl sets GST_LT_LDFLAGS
-AS_LIBTOOL(GST, 104, 0, 104)
+AS_LIBTOOL(GST, 300, 0, 300)
 
 dnl *** required versions of GStreamer stuff ***
-GST_REQ=1.1.4.1
+GST_REQ=1.3.0.1
 
 dnl *** autotools stuff ****
 
@@ -241,7 +241,7 @@ dnl GLib
 GLIB_REQ=2.32
 AG_GST_GLIB_CHECK([$GLIB_REQ])
 
-ORC_CHECK([0.4.17])
+ORC_CHECK([0.4.18])
 
 dnl checks for gstreamer
 dnl uninstalled is selected preferentially -- see pkg-config(1)
@@ -683,11 +683,6 @@ dnl *** ogg ***
 translit(dnm, m, l) AM_CONDITIONAL(USE_OGG, true)
 AG_GST_CHECK_FEATURE(OGG, [Xiph Ogg library], ogg, [
   AG_GST_PKG_CHECK_MODULES(OGG, ogg >= 1.0)
-  if test $HAVE_OGG = no
-  then
-    XIPH_PATH_OGG(HAVE_OGG="yes", HAVE_OGG="no")
-    AS_SCRUB_INCLUDE(OGG_CFLAGS)
-  fi
 ])
 
 dnl *** pango ***
@@ -703,15 +698,9 @@ AG_GST_CHECK_FEATURE(THEORA, [Xiph Theora video codec], theora, [
 ])
 
 dnl *** vorbis ***
-dnl AM_PATH_VORBIS only takes two options
 translit(dnm, m, l) AM_CONDITIONAL(USE_VORBIS, true)
 AG_GST_CHECK_FEATURE(VORBIS, [Xiph Vorbis audio codec], vorbis, [
   AG_GST_PKG_CHECK_MODULES(VORBIS, vorbis >= 1.0 vorbisenc >= 1.0)
-  if test $HAVE_VORBIS = no
-  then
-    XIPH_PATH_VORBIS(HAVE_VORBIS="yes", HAVE_VORBIS="no")
-    AS_SCRUB_INCLUDE(VORBIS_CFLAGS)
-  fi
 ])
 
 if test "x$HAVE_VORBIS" = "xyes"; then

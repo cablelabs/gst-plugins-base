@@ -2290,10 +2290,12 @@ gst_video_decoder_prepare_finish_frame (GstVideoDecoder *
 
   if (frame->pts == GST_CLOCK_TIME_NONE) {
     /* Last ditch timestamp guess: Just add the duration to the previous
-     * frame */
-    if (priv->last_timestamp_out != GST_CLOCK_TIME_NONE &&
-        frame->duration != GST_CLOCK_TIME_NONE) {
-      frame->pts = priv->last_timestamp_out + frame->duration;
+     * frame. If it's the first frame, just use the segment start. */
+    if (frame->duration != GST_CLOCK_TIME_NONE) {
+      if (GST_CLOCK_TIME_IS_VALID (priv->last_timestamp_out))
+        frame->pts = priv->last_timestamp_out + frame->duration;
+      else
+        frame->pts = decoder->output_segment.start;
       GST_LOG_OBJECT (decoder,
           "Guessing timestamp %" GST_TIME_FORMAT " for frame...",
           GST_TIME_ARGS (frame->pts));
@@ -2435,6 +2437,7 @@ gst_video_decoder_finish_frame (GstVideoDecoder * decoder,
   if (G_UNLIKELY (priv->output_state_changed || (priv->output_state
               && gst_pad_check_reconfigure (decoder->srcpad)))) {
     if (!gst_video_decoder_negotiate (decoder)) {
+      gst_pad_mark_reconfigure (decoder->srcpad);
       if (GST_PAD_IS_FLUSHING (decoder->srcpad))
         ret = GST_FLOW_FLUSHING;
       else
@@ -3182,6 +3185,7 @@ gst_video_decoder_allocate_output_buffer (GstVideoDecoder * decoder)
           || gst_pad_check_reconfigure (decoder->srcpad))) {
     if (!gst_video_decoder_negotiate (decoder)) {
       GST_DEBUG_OBJECT (decoder, "Failed to negotiate, fallback allocation");
+      gst_pad_mark_reconfigure (decoder->srcpad);
       goto fallback;
     }
   }
@@ -3246,8 +3250,12 @@ gst_video_decoder_allocate_output_frame (GstVideoDecoder *
   }
 
   if (G_UNLIKELY (decoder->priv->output_state_changed
-          || gst_pad_check_reconfigure (decoder->srcpad)))
-    gst_video_decoder_negotiate (decoder);
+          || gst_pad_check_reconfigure (decoder->srcpad))) {
+    if (!gst_video_decoder_negotiate (decoder)) {
+      GST_DEBUG_OBJECT (decoder, "Failed to negotiate, fallback allocation");
+      gst_pad_mark_reconfigure (decoder->srcpad);
+    }
+  }
 
   GST_LOG_OBJECT (decoder, "alloc buffer size %d", num_bytes);
 

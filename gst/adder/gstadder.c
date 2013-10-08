@@ -223,6 +223,8 @@ gst_adder_sink_getcaps (GstPad * pad, GstCaps * filter)
 {
   GstAdder *adder;
   GstCaps *result, *peercaps, *current_caps, *filter_caps;
+  GstStructure *s;
+  gint i, n;
 
   adder = GST_ADDER (GST_PAD_PARENT (pad));
 
@@ -283,6 +285,22 @@ gst_adder_sink_getcaps (GstPad * pad, GstCaps * filter)
     }
   }
 
+  result = gst_caps_make_writable (result);
+
+  n = gst_caps_get_size (result);
+  for (i = 0; i < n; i++) {
+    GstStructure *sref;
+
+    s = gst_caps_get_structure (result, i);
+    sref = gst_structure_copy (s);
+    gst_structure_set (sref, "channels", GST_TYPE_INT_RANGE, 0, 2, NULL);
+    if (gst_structure_is_subset (s, sref)) {
+      /* This field is irrelevant when in mono or stereo */
+      gst_structure_remove_field (s, "channel-mask");
+    }
+    gst_structure_free (sref);
+  }
+
   if (filter_caps)
     gst_caps_unref (filter_caps);
 
@@ -322,9 +340,19 @@ gst_adder_sink_query (GstCollectPads * pads, GstCollectData * pad,
  * the other sinkpads because we can only mix streams with the same caps.
  */
 static gboolean
-gst_adder_setcaps (GstAdder * adder, GstPad * pad, GstCaps * caps)
+gst_adder_setcaps (GstAdder * adder, GstPad * pad, GstCaps * orig_caps)
 {
+  GstCaps *caps;
   GstAudioInfo info;
+  GstStructure *s;
+  gint channels;
+
+  caps = gst_caps_copy (orig_caps);
+
+  s = gst_caps_get_structure (caps, 0);
+  if (gst_structure_get_int (s, "channels", &channels))
+    if (channels <= 2)
+      gst_structure_remove_field (s, "channel-mask");
 
   if (!gst_audio_info_from_caps (&info, caps))
     goto invalid_format;
@@ -337,12 +365,14 @@ gst_adder_setcaps (GstAdder * adder, GstPad * pad, GstCaps * caps)
   if (adder->current_caps != NULL) {
     if (gst_audio_info_is_equal (&info, &adder->info)) {
       GST_OBJECT_UNLOCK (adder);
+      gst_caps_unref (caps);
       return TRUE;
     } else {
       GST_DEBUG_OBJECT (pad, "got input caps %" GST_PTR_FORMAT ", but "
           "current caps are %" GST_PTR_FORMAT, caps, adder->current_caps);
       GST_OBJECT_UNLOCK (adder);
       gst_pad_push_event (pad, gst_event_new_reconfigure ());
+      gst_caps_unref (caps);
       return FALSE;
     }
   }
@@ -356,11 +386,14 @@ gst_adder_setcaps (GstAdder * adder, GstPad * pad, GstCaps * caps)
 
   GST_INFO_OBJECT (pad, "handle caps change to %" GST_PTR_FORMAT, caps);
 
+  gst_caps_unref (caps);
+
   return TRUE;
 
   /* ERRORS */
 invalid_format:
   {
+    gst_caps_unref (caps);
     GST_WARNING_OBJECT (adder, "invalid format set as caps");
     return FALSE;
   }
@@ -1183,16 +1216,47 @@ gst_adder_collected (GstCollectPads * pads, gpointer user_data)
     adder->send_caps = FALSE;
   }
 
+  rate = GST_AUDIO_INFO_RATE (&adder->info);
+  bps = GST_AUDIO_INFO_BPS (&adder->info);
+  bpf = GST_AUDIO_INFO_BPF (&adder->info);
+
+  if (g_atomic_int_compare_and_exchange (&adder->new_segment_pending, TRUE,
+          FALSE)) {
+    GstEvent *event;
+
+    /* 
+     * When seeking we set the start and stop positions as given in the seek
+     * event. We also adjust offset & timestamp accordingly.
+     * This basically ignores all newsegments sent by upstream.
+     */
+    event = gst_event_new_segment (&adder->segment);
+    if (adder->segment.rate > 0.0) {
+      adder->segment.position = adder->segment.start;
+    } else {
+      adder->segment.position = adder->segment.stop;
+    }
+    adder->offset = gst_util_uint64_scale (adder->segment.position,
+        rate, GST_SECOND);
+
+    GST_INFO_OBJECT (adder->srcpad, "sending pending new segment event %"
+        GST_SEGMENT_FORMAT, &adder->segment);
+    if (event) {
+      if (!gst_pad_push_event (adder->srcpad, event)) {
+        GST_WARNING_OBJECT (adder->srcpad, "Sending new segment event failed");
+      }
+    } else {
+      GST_WARNING_OBJECT (adder->srcpad, "Creating new segment event for "
+          "start:%" G_GINT64_FORMAT "  end:%" G_GINT64_FORMAT " failed",
+          adder->segment.start, adder->segment.stop);
+    }
+  }
+
   /* get available bytes for reading, this can be 0 which could mean empty
    * buffers or EOS, which we will catch when we loop over the pads. */
   outsize = gst_collect_pads_available (pads);
   /* can only happen when no pads to collect or all EOS */
   if (outsize == 0)
     goto eos;
-
-  rate = GST_AUDIO_INFO_RATE (&adder->info);
-  bps = GST_AUDIO_INFO_BPS (&adder->info);
-  bpf = GST_AUDIO_INFO_BPF (&adder->info);
 
   GST_LOG_OBJECT (adder,
       "starting to cycle through channels, %d bytes available (bps = %d, bpf = %d)",
@@ -1431,37 +1495,6 @@ gst_adder_collected (GstCollectPads * pads, gpointer user_data)
   } else if (gapbuf) {
     /* we had an output buffer, unref the gapbuffer we kept */
     gst_buffer_unref (gapbuf);
-  }
-
-  if (g_atomic_int_compare_and_exchange (&adder->new_segment_pending, TRUE,
-          FALSE)) {
-    GstEvent *event;
-
-    /* 
-     * When seeking we set the start and stop positions as given in the seek
-     * event. We also adjust offset & timestamp accordingly.
-     * This basically ignores all newsegments sent by upstream.
-     */
-    event = gst_event_new_segment (&adder->segment);
-    if (adder->segment.rate > 0.0) {
-      adder->segment.position = adder->segment.start;
-    } else {
-      adder->segment.position = adder->segment.stop;
-    }
-    adder->offset = gst_util_uint64_scale (adder->segment.position,
-        rate, GST_SECOND);
-
-    GST_INFO_OBJECT (adder->srcpad, "sending pending new segment event %"
-        GST_SEGMENT_FORMAT, &adder->segment);
-    if (event) {
-      if (!gst_pad_push_event (adder->srcpad, event)) {
-        GST_WARNING_OBJECT (adder->srcpad, "Sending new segment event failed");
-      }
-    } else {
-      GST_WARNING_OBJECT (adder->srcpad, "Creating new segment event for "
-          "start:%" G_GINT64_FORMAT "  end:%" G_GINT64_FORMAT " failed",
-          adder->segment.start, adder->segment.stop);
-    }
   }
 
   if (G_UNLIKELY (adder->pending_events)) {

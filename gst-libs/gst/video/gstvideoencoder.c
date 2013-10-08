@@ -1290,10 +1290,15 @@ gst_video_encoder_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
     goto done;
   }
 
+  if (GST_CLOCK_TIME_IS_VALID (cstop))
+    duration = cstop - cstart;
+  else
+    duration = GST_CLOCK_TIME_NONE;
+
   /* incoming DTS is not really relevant and does not make sense anyway,
    * so pass along _NONE and maybe come up with something better later on */
   frame = gst_video_encoder_new_frame (encoder, buf, cstart,
-      GST_CLOCK_TIME_NONE, cstop - cstart);
+      GST_CLOCK_TIME_NONE, duration);
 
   GST_OBJECT_LOCK (encoder);
   if (priv->force_key_unit) {
@@ -1614,6 +1619,7 @@ gst_video_encoder_allocate_output_buffer (GstVideoEncoder * encoder, gsize size)
               && gst_pad_check_reconfigure (encoder->srcpad)))) {
     if (!gst_video_encoder_negotiate (encoder)) {
       GST_DEBUG_OBJECT (encoder, "Failed to negotiate, fallback allocation");
+      gst_pad_mark_reconfigure (encoder->srcpad);
       goto fallback;
     }
   }
@@ -1662,8 +1668,12 @@ gst_video_encoder_allocate_output_frame (GstVideoEncoder *
   GST_VIDEO_ENCODER_STREAM_LOCK (encoder);
   if (G_UNLIKELY (encoder->priv->output_state_changed
           || (encoder->priv->output_state
-              && gst_pad_check_reconfigure (encoder->srcpad))))
-    gst_video_encoder_negotiate (encoder);
+              && gst_pad_check_reconfigure (encoder->srcpad)))) {
+    if (!gst_video_encoder_negotiate (encoder)) {
+      GST_DEBUG_OBJECT (encoder, "Failed to negotiate, fallback allocation");
+      gst_pad_mark_reconfigure (encoder->srcpad);
+    }
+  }
 
   GST_LOG_OBJECT (encoder, "alloc buffer size %" G_GSIZE_FORMAT, size);
 
@@ -1735,6 +1745,7 @@ gst_video_encoder_finish_frame (GstVideoEncoder * encoder,
   if (G_UNLIKELY (priv->output_state_changed || (priv->output_state
               && gst_pad_check_reconfigure (encoder->srcpad)))) {
     if (!gst_video_encoder_negotiate (encoder)) {
+      gst_pad_mark_reconfigure (encoder->srcpad);
       if (GST_PAD_IS_FLUSHING (encoder->srcpad))
         ret = GST_FLOW_FLUSHING;
       else
