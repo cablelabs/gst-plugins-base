@@ -3234,7 +3234,17 @@ gst_video_decoder_allocate_output_frame (GstVideoDecoder *
   int num_bytes;
 
   g_return_val_if_fail (decoder->priv->output_state, GST_FLOW_NOT_NEGOTIATED);
+#if 0
   g_return_val_if_fail (frame->output_buffer == NULL, GST_FLOW_ERROR);
+#else
+  if (frame->output_buffer != NULL) {
+    GST_ERROR_OBJECT (decoder,
+        "called with existing output_buffer (released %p)",
+        frame->output_buffer);
+    gst_buffer_unref (frame->output_buffer);
+    frame->output_buffer = NULL;
+  }
+#endif
 
   GST_VIDEO_DECODER_STREAM_LOCK (decoder);
 
