@@ -1950,10 +1950,10 @@ gst_audio_ring_buffer_set_channel_positions (GstAudioRingBuffer * buf,
   channels = buf->spec.info.channels;
   to = buf->spec.info.position;
 
-  buf->need_reorder = FALSE;
   if (memcmp (position, to, channels * sizeof (to[0])) == 0)
     return;
 
+  buf->need_reorder = FALSE;
   if (!gst_audio_get_channel_reorder_map (channels, position, to,
           buf->channel_reorder_map))
     g_return_if_reached ();
@@ -1984,9 +1984,20 @@ gst_audio_ring_buffer_set_timestamp (GstAudioRingBuffer * buf, gint readseg,
 
   GST_INFO_OBJECT (buf, "Storing timestamp %" GST_TIME_FORMAT
       " @ %d", GST_TIME_ARGS (timestamp), readseg);
-  if (buf->timestamps) {
-    buf->timestamps[readseg] = timestamp;
-  } else {
-    GST_ERROR_OBJECT (buf, "Could not store timestamp, no timestamps buffer");
+
+  GST_OBJECT_LOCK (buf);
+  if (G_UNLIKELY (!buf->acquired))
+    goto not_acquired;
+
+  buf->timestamps[readseg] = timestamp;
+
+done:
+  GST_OBJECT_UNLOCK (buf);
+  return;
+
+not_acquired:
+  {
+    GST_DEBUG_OBJECT (buf, "we are not acquired");
+    goto done;
   }
 }

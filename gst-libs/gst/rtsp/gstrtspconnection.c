@@ -446,6 +446,53 @@ gst_rtsp_connection_get_tls (GstRTSPConnection * conn, GError ** error)
   return result;
 }
 
+/**
+ * gst_rtsp_connection_set_tls_validation_flags:
+ * @conn: a #GstRTSPConnection
+ * @flags: the validation flags.
+ *
+ * Sets the TLS validation flags to be used to verify the peer
+ * certificate when a TLS connection is established.
+ *
+ * Returns: TRUE if the validation flags are set correctly, or FALSE if
+ * @conn is NULL or is not a TLS connection.
+ *
+ * Since: 1.2.1
+ */
+gboolean
+gst_rtsp_connection_set_tls_validation_flags (GstRTSPConnection * conn,
+    GTlsCertificateFlags flags)
+{
+  gboolean res = FALSE;
+
+  g_return_val_if_fail (conn != NULL, FALSE);
+
+  res = g_socket_client_get_tls (conn->client);
+  if (res)
+    g_socket_client_set_tls_validation_flags (conn->client, flags);
+
+  return res;
+}
+
+/**
+ * gst_rtsp_connection_get_tls_validation_flags:
+ * @conn: a #GstRTSPConnection
+ *
+ * Gets the TLS validation flags used to verify the peer certificate
+ * when a TLS connection is established.
+ *
+ * Returns: the validationg flags.
+ *
+ * Since: 1.2.1
+ */
+GTlsCertificateFlags
+gst_rtsp_connection_get_tls_validation_flags (GstRTSPConnection * conn)
+{
+  g_return_val_if_fail (conn != NULL, 0);
+
+  return g_socket_client_get_tls_validation_flags (conn->client);
+}
+
 static GstRTSPResult
 setup_tunneling (GstRTSPConnection * conn, GTimeVal * timeout, gchar * uri)
 {
@@ -517,8 +564,13 @@ setup_tunneling (GstRTSPConnection * conn, GTimeVal * timeout, gchar * uri)
       url->abspath, url->query ? "?" : "", url->query ? url->query : "");
 
   /* connect to the host/port */
-  connection = g_socket_client_connect_to_uri (conn->client,
-      uri, 0, conn->cancellable, &error);
+  if (conn->proxy_host) {
+    connection = g_socket_client_connect_to_host (conn->client,
+        conn->proxy_host, conn->proxy_port, conn->cancellable, &error);
+  } else {
+    connection = g_socket_client_connect_to_uri (conn->client,
+        uri, 0, conn->cancellable, &error);
+  }
   if (connection == NULL)
     goto connect_failed;
 
@@ -652,8 +704,13 @@ gst_rtsp_connection_connect (GstRTSPConnection * conn, GTimeVal * timeout)
     uri = gst_rtsp_url_get_request_uri (url);
   }
 
-  connection = g_socket_client_connect_to_uri (conn->client,
-      uri, url_port, conn->cancellable, &error);
+  if (conn->proxy_host) {
+    connection = g_socket_client_connect_to_host (conn->client,
+        conn->proxy_host, conn->proxy_port, conn->cancellable, &error);
+  } else {
+    connection = g_socket_client_connect_to_uri (conn->client,
+        uri, url_port, conn->cancellable, &error);
+  }
   if (connection == NULL)
     goto connect_failed;
 
