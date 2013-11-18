@@ -366,6 +366,161 @@ GST_START_TEST (test_rgb_formats)
 
 GST_END_TEST;
 
+struct BackwardsPlaybackData
+{
+  GstClockTime last_ts;
+  const gchar *error_msg;
+};
+
+static gboolean
+eos_watch (GstBus * bus, GstMessage * message, GMainLoop * loop)
+{
+  if (GST_MESSAGE_TYPE (message) == GST_MESSAGE_EOS) {
+    g_main_loop_quit (loop);
+  }
+  return TRUE;
+}
+
+static GstPadProbeReturn
+backward_check_probe (GstPad * pad, GstPadProbeInfo * info, gpointer udata)
+{
+  if (info->type & GST_PAD_PROBE_TYPE_BUFFER) {
+    GstBuffer *buf = info->data;
+    struct BackwardsPlaybackData *pdata = udata;
+
+    if (GST_BUFFER_TIMESTAMP_IS_VALID (buf)) {
+      if (GST_CLOCK_TIME_IS_VALID (pdata->last_ts) &&
+          pdata->last_ts < GST_BUFFER_TIMESTAMP (buf)) {
+        pdata->error_msg = "Received buffer with increasing timestamp";
+      }
+      pdata->last_ts = GST_BUFFER_TIMESTAMP (buf);
+    } else {
+      pdata->error_msg = "Received buffer without timestamp";
+    }
+
+  }
+  return GST_PAD_PROBE_OK;
+}
+
+GST_START_TEST (test_backward_playback)
+{
+  GstBus *bus;
+  GstElement *bin;
+  GError *error = NULL;
+  GMainLoop *loop;
+  guint bus_watch = 0;
+  GstStateChangeReturn ret;
+  GstElement *src;
+  GstPad *pad;
+  gulong pad_probe;
+  struct BackwardsPlaybackData pdata;
+
+  pdata.last_ts = GST_CLOCK_TIME_NONE;
+  pdata.error_msg = NULL;
+
+  bin = gst_parse_launch ("videotestsrc name=src ! fakesink name=sink "
+      "sync=true", &error);
+
+  /* run until we receive EOS */
+  loop = g_main_loop_new (NULL, FALSE);
+  bus = gst_element_get_bus (bin);
+  bus_watch = gst_bus_add_watch (bus, (GstBusFunc) eos_watch, loop);
+  gst_object_unref (bus);
+
+
+  ret = gst_element_set_state (bin, GST_STATE_PAUSED);
+
+  if (ret == GST_STATE_CHANGE_ASYNC) {
+    ret = gst_element_get_state (bin, NULL, NULL, GST_CLOCK_TIME_NONE);
+    fail_if (ret != GST_STATE_CHANGE_SUCCESS, "Could not start test pipeline");
+  }
+
+  src = gst_bin_get_by_name (GST_BIN (bin), "src");
+  pad = gst_element_get_static_pad (src, "src");
+  pad_probe = gst_pad_add_probe (pad, GST_PAD_PROBE_TYPE_BUFFER,
+      (GstPadProbeCallback) backward_check_probe, &pdata, NULL);
+
+  gst_element_seek (bin, -1.0, GST_FORMAT_TIME,
+      GST_SEEK_FLAG_ACCURATE | GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
+      0, GST_SEEK_TYPE_SET, 1 * GST_SECOND);
+
+  ret = gst_element_set_state (bin, GST_STATE_PLAYING);
+  fail_if (ret == GST_STATE_CHANGE_FAILURE, "Could not start test pipeline");
+  if (ret == GST_STATE_CHANGE_ASYNC) {
+    ret = gst_element_get_state (bin, NULL, NULL, GST_CLOCK_TIME_NONE);
+    fail_if (ret != GST_STATE_CHANGE_SUCCESS, "Could not start test pipeline");
+  }
+  g_main_loop_run (loop);
+
+  ret = gst_element_set_state (bin, GST_STATE_NULL);
+  fail_if (ret == GST_STATE_CHANGE_FAILURE, "Could not stop test pipeline");
+  if (ret == GST_STATE_CHANGE_ASYNC) {
+    ret = gst_element_get_state (bin, NULL, NULL, GST_CLOCK_TIME_NONE);
+    fail_if (ret != GST_STATE_CHANGE_SUCCESS, "Could not stop test pipeline");
+  }
+
+  if (pdata.error_msg)
+    fail ("%s", pdata.error_msg);
+
+  /* clean up */
+  gst_pad_remove_probe (pad, pad_probe);
+  gst_object_unref (pad);
+  g_main_loop_unref (loop);
+  g_source_remove (bus_watch);
+  gst_object_unref (bin);
+}
+
+GST_END_TEST;
+
+GST_START_TEST (test_duration_query)
+{
+  GstElement *bin;
+  GError *error = NULL;
+  GstStateChangeReturn ret;
+  gboolean queryret;
+  gint64 duration = -1;
+
+  bin =
+      gst_parse_launch ("videotestsrc ! fakesink name=sink sync=true", &error);
+  ret = gst_element_set_state (bin, GST_STATE_PAUSED);
+  if (ret == GST_STATE_CHANGE_ASYNC) {
+    ret = gst_element_get_state (bin, NULL, NULL, GST_CLOCK_TIME_NONE);
+    fail_if (ret != GST_STATE_CHANGE_SUCCESS, "Could not start test pipeline");
+  }
+  queryret = gst_element_query_duration (bin, GST_FORMAT_TIME, &duration);
+  /* should have unknown duration */
+  if (queryret && duration != -1) {
+    fail ("Should return false on duration query");
+  }
+  gst_element_set_state (bin, GST_STATE_NULL);
+  gst_object_unref (bin);
+
+  bin = gst_parse_launch ("videotestsrc num-buffers=100 ! capsfilter "
+      "caps=\"video/x-raw,framerate=(fraction)10/1\" ! "
+      "fakesink name=sink sync=true", &error);
+  ret = gst_element_set_state (bin, GST_STATE_PAUSED);
+  if (ret == GST_STATE_CHANGE_ASYNC) {
+    ret = gst_element_get_state (bin, NULL, NULL, GST_CLOCK_TIME_NONE);
+    fail_if (ret != GST_STATE_CHANGE_SUCCESS, "Could not start test pipeline");
+  }
+  queryret = gst_element_query_duration (bin, GST_FORMAT_TIME, &duration);
+  fail_unless (queryret, "Duration should be returned");
+  fail_unless (duration == GST_SECOND * 10, "Expected duration didn't match");
+
+  /* reverse playback should have no impact on duration */
+  gst_element_seek (bin, -1.0, GST_FORMAT_TIME,
+      GST_SEEK_FLAG_ACCURATE | GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
+      0, GST_SEEK_TYPE_SET, 1 * GST_SECOND);
+  queryret = gst_element_query_duration (bin, GST_FORMAT_TIME, &duration);
+  fail_unless (queryret, "Duration should be returned");
+  fail_unless (duration == GST_SECOND * 10, "Expected duration didn't match");
+
+  gst_element_set_state (bin, GST_STATE_NULL);
+  gst_object_unref (bin);
+}
+
+GST_END_TEST;
+
 
 /* FIXME: add tests for YUV formats */
 
@@ -386,6 +541,8 @@ videotestsrc_suite (void)
 
   tcase_add_test (tc_chain, test_all_patterns);
   tcase_add_test (tc_chain, test_rgb_formats);
+  tcase_add_test (tc_chain, test_backward_playback);
+  tcase_add_test (tc_chain, test_duration_query);
 
   return s;
 }

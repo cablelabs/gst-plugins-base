@@ -773,6 +773,16 @@ gst_video_test_src_query (GstBaseSrc * bsrc, GstQuery * query)
       gst_query_set_convert (query, src_fmt, src_val, dest_fmt, dest_val);
       break;
     }
+    case GST_QUERY_DURATION:{
+      if (bsrc->num_buffers != -1) {
+        gint64 dur = gst_util_uint64_scale_int_round (bsrc->num_buffers
+            * GST_SECOND, src->info.fps_d, src->info.fps_n);
+        res = TRUE;
+        gst_query_set_duration (query, GST_FORMAT_TIME, dur);
+        break;
+      }
+      /* fall through */
+    }
     default:
       res = GST_BASE_SRC_CLASS (parent_class)->query (bsrc, query);
       break;
@@ -813,6 +823,7 @@ gst_video_test_src_do_seek (GstBaseSrc * bsrc, GstSegment * segment)
 
   segment->time = segment->start;
   position = segment->position;
+  src->reverse = segment->rate < 0;
 
   /* now move to the position indicated */
   if (src->info.fps_n) {
@@ -862,6 +873,11 @@ gst_video_test_src_fill (GstPushSrc * psrc, GstBuffer * buffer)
   if (G_UNLIKELY (src->info.fps_n == 0 && src->n_frames == 1))
     goto eos;
 
+  if (G_UNLIKELY (src->n_frames == -1)) {
+    /* EOS for reverse playback */
+    goto eos;
+  }
+
   GST_LOG_OBJECT (src,
       "creating buffer from pool for frame %d", (gint) src->n_frames);
 
@@ -890,12 +906,20 @@ gst_video_test_src_fill (GstPushSrc * psrc, GstBuffer * buffer)
       GST_TIME_ARGS (src->timestamp_offset), GST_TIME_ARGS (src->running_time));
 
   GST_BUFFER_OFFSET (buffer) = src->accum_frames + src->n_frames;
-  src->n_frames++;
+  if (src->reverse) {
+    src->n_frames--;
+  } else {
+    src->n_frames++;
+  }
   GST_BUFFER_OFFSET_END (buffer) = GST_BUFFER_OFFSET (buffer) + 1;
   if (src->info.fps_n) {
     next_time = gst_util_uint64_scale_int (src->n_frames * GST_SECOND,
         src->info.fps_d, src->info.fps_n);
-    GST_BUFFER_DURATION (buffer) = next_time - src->running_time;
+    if (src->reverse) {
+      GST_BUFFER_DURATION (buffer) = src->running_time - next_time;
+    } else {
+      GST_BUFFER_DURATION (buffer) = next_time - src->running_time;
+    }
   } else {
     next_time = src->timestamp_offset;
     /* NONE means forever */
