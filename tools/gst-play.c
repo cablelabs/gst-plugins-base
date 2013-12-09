@@ -27,6 +27,10 @@
 #include <gst/gst-i18n-app.h>
 #include <gst/pbutils/pbutils.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "gst-play-kb.h"
 
 GST_DEBUG_CATEGORY (play_debug);
 #define GST_CAT_DEFAULT play_debug
@@ -49,12 +53,15 @@ typedef struct
   gboolean buffering;
   gboolean is_live;
 
+  GstState desired_state;       /* as per user interaction, PAUSED or PLAYING */
+
   /* configuration */
   gboolean gapless;
 } GstPlay;
 
 static gboolean play_bus_msg (GstBus * bus, GstMessage * msg, gpointer data);
 static gboolean play_next (GstPlay * play);
+static gboolean play_prev (GstPlay * play);
 static gboolean play_timeout (gpointer user_data);
 static void play_about_to_finish (GstElement * playbin, gpointer user_data);
 static void play_reset (GstPlay * play);
@@ -100,6 +107,8 @@ play_new (gchar ** uris, const gchar * audio_sink, const gchar * video_sink,
   play->missing = NULL;
   play->buffering = FALSE;
   play->is_live = FALSE;
+
+  play->desired_state = GST_STATE_PLAYING;
 
   play->gapless = gapless;
   if (gapless) {
@@ -177,7 +186,7 @@ play_bus_msg (GstBus * bus, GstMessage * msg, gpointer user_data)
         /* a 100% message means buffering is done */
         if (play->buffering) {
           play->buffering = FALSE;
-          gst_element_set_state (play->playbin, GST_STATE_PLAYING);
+          gst_element_set_state (play->playbin, play->desired_state);
         }
       } else {
         /* buffering... */
@@ -276,12 +285,18 @@ play_timeout (gpointer user_data)
 {
   GstPlay *play = user_data;
   gint64 pos = -1, dur = -1;
+  gchar status[64] = { 0, };
 
   if (play->buffering)
     return TRUE;
 
   gst_element_query_position (play->playbin, GST_FORMAT_TIME, &pos);
   gst_element_query_duration (play->playbin, GST_FORMAT_TIME, &dur);
+
+  if (play->desired_state == GST_STATE_PAUSED)
+    g_snprintf (status, sizeof (status), "Paused");
+  else
+    memset (status, ' ', sizeof (status) - 1);
 
   if (pos >= 0 && dur > 0) {
     gchar dstr[32], pstr[32];
@@ -291,7 +306,7 @@ play_timeout (gpointer user_data)
     pstr[9] = '\0';
     g_snprintf (dstr, 32, "%" GST_TIME_FORMAT, GST_TIME_ARGS (dur));
     dstr[9] = '\0';
-    g_print ("%s / %s\r", pstr, dstr);
+    g_print ("%s / %s %s\r", pstr, dstr, status);
   }
 
   return TRUE;
@@ -314,28 +329,22 @@ play_uri_get_display_name (GstPlay * play, const gchar * uri)
   return loc;
 }
 
-/* returns FALSE if we have reached the end of the playlist */
-static gboolean
-play_next (GstPlay * play)
+static void
+play_uri (GstPlay * play, const gchar * next_uri)
 {
   GstStateChangeReturn sret;
-  const gchar *next_uri;
   gchar *loc;
-
-  if (++play->cur_idx >= play->num_uris)
-    return FALSE;
 
   gst_element_set_state (play->playbin, GST_STATE_READY);
   play_reset (play);
 
-  next_uri = play->uris[play->cur_idx];
   loc = play_uri_get_display_name (play, next_uri);
   g_print ("Now playing %s\n", loc);
   g_free (loc);
 
   g_object_set (play->playbin, "uri", next_uri, NULL);
 
-  sret = gst_element_set_state (play->playbin, GST_STATE_PLAYING);
+  sret = gst_element_set_state (play->playbin, play->desired_state);
   switch (sret) {
     case GST_STATE_CHANGE_FAILURE:
       /* ignore, we should get an error message posted on the bus */
@@ -350,7 +359,27 @@ play_next (GstPlay * play)
     default:
       break;
   }
+}
 
+/* returns FALSE if we have reached the end of the playlist */
+static gboolean
+play_next (GstPlay * play)
+{
+  if ((play->cur_idx + 1) >= play->num_uris)
+    return FALSE;
+
+  play_uri (play, play->uris[++play->cur_idx]);
+  return TRUE;
+}
+
+/* returns FALSE if we have reached the beginning of the playlist */
+static gboolean
+play_prev (GstPlay * play)
+{
+  if (play->cur_idx == 0 || play->num_uris <= 1)
+    return FALSE;
+
+  play_uri (play, play->uris[--play->cur_idx]);
   return TRUE;
 }
 
@@ -427,13 +456,142 @@ add_to_playlist (GPtrArray * playlist, const gchar * filename)
     g_warning ("Could not make URI out of filename '%s'", filename);
 }
 
+static void
+shuffle_uris (gchar ** uris, guint num)
+{
+  gchar *tmp;
+  guint i, j;
+
+  if (num < 2)
+    return;
+
+  for (i = 0; i < num; i++) {
+    /* gets equally distributed random number in 0..num-1 [0;num[ */
+    j = g_random_int_range (0, num);
+    tmp = uris[j];
+    uris[j] = uris[i];
+    uris[i] = tmp;
+  }
+}
+
+static void
+restore_terminal (void)
+{
+  gst_play_kb_set_key_handler (NULL, NULL);
+}
+
+static void
+toggle_paused (GstPlay * play)
+{
+  if (play->desired_state == GST_STATE_PLAYING)
+    play->desired_state = GST_STATE_PAUSED;
+  else
+    play->desired_state = GST_STATE_PLAYING;
+
+  if (!play->buffering) {
+    gst_element_set_state (play->playbin, play->desired_state);
+  } else if (play->desired_state == GST_STATE_PLAYING) {
+    g_print ("\nWill play as soon as buffering finishes)\n");
+  }
+}
+
+static void
+relative_seek (GstPlay * play, gdouble percent)
+{
+  GstQuery *query;
+  gboolean seekable = FALSE;
+  gint64 dur = -1, pos = -1;
+
+  g_return_if_fail (percent >= -1.0 && percent <= 1.0);
+
+  if (!gst_element_query_position (play->playbin, GST_FORMAT_TIME, &pos))
+    goto seek_failed;
+
+  query = gst_query_new_seeking (GST_FORMAT_TIME);
+  if (!gst_element_query (play->playbin, query)) {
+    gst_query_unref (query);
+    goto seek_failed;
+  }
+
+  gst_query_parse_seeking (query, NULL, &seekable, NULL, &dur);
+  gst_query_unref (query);
+
+  if (!seekable || dur <= 0)
+    goto seek_failed;
+
+  pos = pos + dur * percent;
+  if (pos > dur) {
+    if (!play_next (play)) {
+      g_print ("\nReached end of play list.\n");
+      g_main_loop_quit (play->loop);
+    }
+  } else {
+    if (pos < 0)
+      pos = 0;
+    if (!gst_element_seek_simple (play->playbin, GST_FORMAT_TIME,
+            GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT, pos))
+      goto seek_failed;
+  }
+
+  return;
+
+seek_failed:
+  {
+    g_print ("\nCould not seek.\n");
+  }
+}
+
+static void
+keyboard_cb (const gchar * key_input, gpointer user_data)
+{
+  GstPlay *play = (GstPlay *) user_data;
+
+  switch (g_ascii_tolower (key_input[0])) {
+    case ' ':
+      toggle_paused (play);
+      break;
+    case 'q':
+    case 'Q':
+      g_main_loop_quit (play->loop);
+      break;
+    case '>':
+      if (!play_next (play)) {
+        g_print ("\nReached end of play list.\n");
+        g_main_loop_quit (play->loop);
+      }
+      break;
+    case '<':
+      play_prev (play);
+      break;
+    case 27:                   /* ESC */
+      if (key_input[1] == '\0') {
+        g_main_loop_quit (play->loop);
+        break;
+      }
+      /* fall through */
+    default:
+      if (strcmp (key_input, GST_PLAY_KB_ARROW_RIGHT) == 0) {
+        relative_seek (play, +0.08);
+      } else if (strcmp (key_input, GST_PLAY_KB_ARROW_LEFT) == 0) {
+        relative_seek (play, -0.01);
+      } else {
+        GST_INFO ("keyboard input:");
+        for (; *key_input != '\0'; ++key_input)
+          GST_INFO ("  code %3d", *key_input);
+      }
+      break;
+  }
+}
+
 int
 main (int argc, char **argv)
 {
   GstPlay *play;
   GPtrArray *playlist;
   gboolean print_version = FALSE;
+  gboolean interactive = FALSE; /* FIXME: maybe enable by default? */
   gboolean gapless = FALSE;
+  gboolean shuffle = FALSE;
   gchar **filenames = NULL;
   gchar *audio_sink = NULL;
   gchar *video_sink = NULL;
@@ -450,6 +608,10 @@ main (int argc, char **argv)
         N_("Audio sink to use (default is autoaudiosink)"), NULL},
     {"gapless", 0, 0, G_OPTION_ARG_NONE, &gapless,
         N_("Enable gapless playback"), NULL},
+    {"shuffle", 0, 0, G_OPTION_ARG_NONE, &shuffle,
+        N_("Shuffle playlist"), NULL},
+    {"interactive", 0, 0, G_OPTION_ARG_NONE, &interactive,
+        N_("interactive"), NULL},
     {G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &filenames, NULL},
     {NULL}
   };
@@ -503,16 +665,31 @@ main (int argc, char **argv)
   }
   g_strfreev (filenames);
 
+  num = playlist->len;
   g_ptr_array_add (playlist, NULL);
 
-  /* play */
   uris = (gchar **) g_ptr_array_free (playlist, FALSE);
+
+  if (shuffle)
+    shuffle_uris (uris, num);
+
+  /* prepare */
   play = play_new (uris, audio_sink, video_sink, gapless);
 
+  if (interactive) {
+    if (gst_play_kb_set_key_handler (keyboard_cb, play)) {
+      atexit (restore_terminal);
+    } else {
+      g_print ("Interactive keyboard handling in terminal not available.\n");
+    }
+  }
+
+  /* play */
   do_play (play);
 
   /* clean up */
   play_free (play);
 
+  g_print ("\n");
   return 0;
 }

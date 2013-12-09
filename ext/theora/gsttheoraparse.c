@@ -126,8 +126,6 @@ gst_theora_parse_class_init (GstTheoraParseClass * klass)
    * GstTheoraParse:sychronization-points
    *
    * An array of (granuletime, buffertime) pairs
-   *
-   * Since: 0.10.10
    */
   g_object_class_install_property (gobject_class, PROP_SYNCHRONIZATION_POINTS,
       g_param_spec_value_array ("synchronization-points",
@@ -367,10 +365,10 @@ theora_parse_push_headers (GstTheoraParse * parse)
 {
   gint i;
 
-  theora_parse_drain_event_queue (parse);
-
   if (!parse->streamheader_received)
     theora_parse_set_streamheader (parse);
+
+  theora_parse_drain_event_queue (parse);
 
   /* ignore return values, we pass along the result of pushing data packets only
    */
@@ -721,7 +719,8 @@ theora_parse_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
       ret = gst_pad_event_default (pad, parent, event);
       break;
     default:
-      if (parse->send_streamheader && GST_EVENT_IS_SERIALIZED (event))
+      if (parse->send_streamheader && GST_EVENT_IS_SERIALIZED (event)
+          && GST_EVENT_TYPE (event) > GST_EVENT_CAPS)
         ret = theora_parse_queue_event (parse, event);
       else
         ret = gst_pad_event_default (pad, parent, event);
