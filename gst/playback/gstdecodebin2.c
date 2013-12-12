@@ -822,8 +822,6 @@ gst_decode_bin_class_init (GstDecodeBinClass * klass)
    * @bin: The decodebin
    *
    * This signal is emitted once decodebin has finished decoding all the data.
-   *
-   * Since: 0.10.16
    */
   gst_decode_bin_signals[SIGNAL_DRAINED] =
       g_signal_new ("drained", G_TYPE_FROM_CLASS (klass),
@@ -852,8 +850,6 @@ gst_decode_bin_class_init (GstDecodeBinClass * klass)
    *
    * Activate buffering in decodebin. This will instruct the multiqueues behind
    * decoders to emit BUFFERING messages.
-
-   * Since: 0.10.26
    */
   g_object_class_install_property (gobject_klass, PROP_USE_BUFFERING,
       g_param_spec_boolean ("use-buffering", "Use Buffering",
@@ -864,8 +860,6 @@ gst_decode_bin_class_init (GstDecodeBinClass * klass)
    * GstDecodeBin:low-percent
    *
    * Low threshold percent for buffering to start.
-   *
-   * Since: 0.10.26
    */
   g_object_class_install_property (gobject_klass, PROP_LOW_PERCENT,
       g_param_spec_int ("low-percent", "Low percent",
@@ -875,8 +869,6 @@ gst_decode_bin_class_init (GstDecodeBinClass * klass)
    * GstDecodeBin:high-percent
    *
    * High threshold percent for buffering to finish.
-   *
-   * Since: 0.10.26
    */
   g_object_class_install_property (gobject_klass, PROP_HIGH_PERCENT,
       g_param_spec_int ("high-percent", "High percent",
@@ -887,8 +879,6 @@ gst_decode_bin_class_init (GstDecodeBinClass * klass)
    * GstDecodeBin:max-size-bytes
    *
    * Max amount of bytes in the queue (0=automatic).
-   *
-   * Since: 0.10.26
    */
   g_object_class_install_property (gobject_klass, PROP_MAX_SIZE_BYTES,
       g_param_spec_uint ("max-size-bytes", "Max. size (bytes)",
@@ -899,8 +889,6 @@ gst_decode_bin_class_init (GstDecodeBinClass * klass)
    * GstDecodeBin:max-size-buffers
    *
    * Max amount of buffers in the queue (0=automatic).
-   *
-   * Since: 0.10.26
    */
   g_object_class_install_property (gobject_klass, PROP_MAX_SIZE_BUFFERS,
       g_param_spec_uint ("max-size-buffers", "Max. size (buffers)",
@@ -911,8 +899,6 @@ gst_decode_bin_class_init (GstDecodeBinClass * klass)
    * GstDecodeBin:max-size-time
    *
    * Max amount of time in the queue (in ns, 0=automatic).
-   *
-   * Since: 0.10.26
    */
   g_object_class_install_property (gobject_klass, PROP_MAX_SIZE_TIME,
       g_param_spec_uint64 ("max-size-time", "Max. size (ns)",
@@ -924,8 +910,6 @@ gst_decode_bin_class_init (GstDecodeBinClass * klass)
    * GstDecodeBin::post-stream-topology
    *
    * Post stream-topology messages on the bus every time the topology changes.
-   *
-   * Since: 0.10.26
    */
   g_object_class_install_property (gobject_klass, PROP_POST_STREAM_TOPOLOGY,
       g_param_spec_boolean ("post-stream-topology", "Post Stream Topology",
@@ -942,8 +926,6 @@ gst_decode_bin_class_init (GstDecodeBinClass * klass)
    * caps (see 'caps' property) will have a pad exposed. Streams that do not
    * match those caps but could have been decoded will not have decoder plugged
    * in internally and will not have a pad exposed.
-   *
-   * Since: 0.10.30
    */
   g_object_class_install_property (gobject_klass, PROP_EXPOSE_ALL_STREAMS,
       g_param_spec_boolean ("expose-all-streams", "Expose All Streams",
@@ -955,8 +937,6 @@ gst_decode_bin_class_init (GstDecodeBinClass * klass)
    * GstDecodeBin2::connection-speed
    *
    * Network connection speed in kbps (0 = unknownw)
-   *
-   * Since: 0.10.XX
    */
   g_object_class_install_property (gobject_klass, PROP_CONNECTION_SPEED,
       g_param_spec_uint64 ("connection-speed", "Connection Speed",
@@ -1439,6 +1419,37 @@ static void no_more_pads_cb (GstElement * element, GstDecodeChain * chain);
 static GstDecodeGroup *gst_decode_chain_get_current_group (GstDecodeChain *
     chain);
 
+static gboolean
+clear_sticky_events (GstPad * pad, GstEvent ** event, gpointer user_data)
+{
+  GST_DEBUG_OBJECT (pad, "clearing sticky event %" GST_PTR_FORMAT, *event);
+  gst_event_unref (*event);
+  *event = NULL;
+  return TRUE;
+}
+
+static gboolean
+copy_sticky_events (GstPad * pad, GstEvent ** event, gpointer user_data)
+{
+  GstPad *gpad = GST_PAD_CAST (user_data);
+
+  GST_DEBUG_OBJECT (gpad, "store sticky event %" GST_PTR_FORMAT, *event);
+  gst_pad_store_sticky_event (gpad, *event);
+
+  return TRUE;
+}
+
+static void
+decode_pad_set_target (GstDecodePad * dpad, GstPad * target)
+{
+  gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (dpad), target);
+  if (target == NULL)
+    gst_pad_sticky_events_foreach (GST_PAD_CAST (dpad), clear_sticky_events,
+        NULL);
+  else
+    gst_pad_sticky_events_foreach (target, copy_sticky_events, dpad);
+}
+
 /* called when a new pad is discovered. It will perform some basic actions
  * before trying to link something to it.
  *
@@ -1511,7 +1522,8 @@ analyze_new_pad (GstDecodeBin * dbin, GstElement * src, GstPad * pad,
     chain->current_pad = gst_decode_pad_new (dbin, chain);
 
   dpad = gst_object_ref (chain->current_pad);
-  gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (dpad), pad);
+  gst_pad_set_active (GST_PAD_CAST (dpad), TRUE);
+  decode_pad_set_target (dpad, pad);
 
   /* 1. Emit 'autoplug-continue' the result will tell us if this pads needs
    * further autoplugging. Only do this for fixed caps, for unfixed caps
@@ -1689,12 +1701,12 @@ analyze_new_pad (GstDecodeBin * dbin, GstElement * src, GstPad * pad,
     gst_element_set_state (delem->capsfilter, GST_STATE_PAUSED);
     gst_bin_add (GST_BIN_CAST (dbin), gst_object_ref (delem->capsfilter));
 
-    gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (dpad), NULL);
+    decode_pad_set_target (dpad, NULL);
     p = gst_element_get_static_pad (delem->capsfilter, "sink");
     gst_pad_link_full (pad, p, GST_PAD_LINK_CHECK_NOTHING);
     gst_object_unref (p);
     p = gst_element_get_static_pad (delem->capsfilter, "src");
-    gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (dpad), p);
+    decode_pad_set_target (dpad, p);
     pad = p;
 
     if (!gst_caps_is_fixed (caps)) {
@@ -1874,12 +1886,12 @@ connect_pad (GstDecodeBin * dbin, GstElement * src, GstDecodePad * dpad,
         "is a demuxer, connecting the pad through multiqueue '%s'",
         GST_OBJECT_NAME (chain->parent->multiqueue));
 
-    gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (dpad), NULL);
+    decode_pad_set_target (dpad, NULL);
     if (!(mqpad = gst_decode_group_control_demuxer_pad (chain->parent, pad)))
       goto beach;
     src = chain->parent->multiqueue;
     pad = mqpad;
-    gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (dpad), pad);
+    decode_pad_set_target (dpad, pad);
   }
 
   /* 2. Try to create an element and link to it */
@@ -1895,7 +1907,7 @@ connect_pad (GstDecodeBin * dbin, GstElement * src, GstDecodePad * dpad,
     /* Set dpad target to pad again, it might've been unset
      * below but we came back here because something failed
      */
-    gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (dpad), pad);
+    decode_pad_set_target (dpad, pad);
 
     /* take first factory */
     factory = g_value_get_object (g_value_array_get_nth (factories, 0));
@@ -2004,7 +2016,7 @@ connect_pad (GstDecodeBin * dbin, GstElement * src, GstDecodePad * dpad,
     }
 
     /* 2.0. Unlink pad */
-    gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (dpad), NULL);
+    decode_pad_set_target (dpad, NULL);
 
     /* 2.1. Try to create an element */
     if ((element = gst_element_factory_create (factory, NULL)) == NULL) {
@@ -2371,11 +2383,11 @@ expose_pad (GstDecodeBin * dbin, GstElement * src, GstDecodePad * dpad,
   if (chain->parent && !chain->elements && src != chain->parent->multiqueue) {
     GST_LOG_OBJECT (src, "connecting the pad through multiqueue");
 
-    gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (dpad), NULL);
+    decode_pad_set_target (dpad, NULL);
     if (!(mqpad = gst_decode_group_control_demuxer_pad (chain->parent, pad)))
       goto beach;
     pad = mqpad;
-    gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (dpad), pad);
+    decode_pad_set_target (dpad, pad);
   }
 
   gst_decode_pad_activate (dpad, chain);
@@ -2908,7 +2920,7 @@ gst_decode_chain_free_internal (GstDecodeChain * chain, gboolean hide)
           GST_PAD_CAST (chain->endpad));
     }
 
-    gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (chain->endpad), NULL);
+    decode_pad_set_target (chain->endpad, NULL);
     chain->endpad->exposed = FALSE;
     if (!hide) {
       gst_object_unref (chain->endpad);
