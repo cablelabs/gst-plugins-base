@@ -160,8 +160,8 @@ static const FormatInfo formats[] = {
   {"audio/x-qdm", "QDesign Music (QDM)", FLAG_AUDIO, ""},
   {"audio/x-qdm2", "QDesign Music (QDM) 2", FLAG_AUDIO, ""},
   {"audio/x-ralf-mpeg4-generic", "Real Audio Lossless (RALF)", FLAG_AUDIO, ""},
-  {"audio/x-sbc", "SBC", FLAG_AUDIO, "sbc"},
-  {"audio/x-sds", "SDS", FLAG_AUDIO, ""},
+  {"audio/x-sbc", "Low Complexity Subband Coding", FLAG_AUDIO, "sbc"},
+  {"audio/x-sds", "Midi Sample Dump Standard", FLAG_AUDIO, ""},
   {"audio/x-shorten", "Shorten Lossless", FLAG_AUDIO, "shn"},
   {"audio/x-sid", "Sid", FLAG_AUDIO, "sid"},
   {"audio/x-sipro", "Sipro/ACELP.NET Voice", FLAG_AUDIO, ""},
@@ -181,6 +181,7 @@ static const FormatInfo formats[] = {
   {"audio/x-wavpack-correction", "Wavpack", 0, "wpc"},
   {"audio/x-wms", N_("Windows Media Speech"), FLAG_AUDIO, ""},
   {"audio/x-voxware", "Voxware", FLAG_AUDIO, ""},
+  {"audio/x-xi", "Fasttracker 2 Extended Instrument", FLAG_AUDIO, "xi"},
 
 
   /* video formats with static descriptions */
