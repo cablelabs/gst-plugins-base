@@ -1758,6 +1758,17 @@ gst_video_decoder_reset (GstVideoDecoder * decoder, gboolean full,
 
     priv->decode_frame_number = 0;
     priv->base_picture_number = 0;
+
+    if (priv->pool) {
+      gst_buffer_pool_set_active (priv->pool, FALSE);
+      gst_object_unref (priv->pool);
+      priv->pool = NULL;
+    }
+
+    if (priv->allocator) {
+      gst_object_unref (priv->allocator);
+      priv->allocator = NULL;
+    }
   }
 
   priv->discont = TRUE;
@@ -2402,7 +2413,7 @@ no_output_buffer:
  * without any processing other than removing it from list of pending frames,
  * after which it is considered finished and released.
  *
- * Since: 1.4
+ * Since: 1.2.2
  */
 void
 gst_video_decoder_release_frame (GstVideoDecoder * dec,

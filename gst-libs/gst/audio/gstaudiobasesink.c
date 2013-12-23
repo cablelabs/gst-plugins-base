@@ -80,7 +80,7 @@ enum
   LAST_SIGNAL
 };
 
-/* FIXME: 0.11, store the buffer_time and latency_time in nanoseconds */
+/* FIXME: 2.0, store the buffer_time and latency_time in nanoseconds */
 #define DEFAULT_BUFFER_TIME     ((200 * GST_MSECOND) / GST_USECOND)
 #define DEFAULT_LATENCY_TIME    ((10 * GST_MSECOND) / GST_USECOND)
 #define DEFAULT_PROVIDE_CLOCK   TRUE
@@ -90,7 +90,7 @@ enum
 #define DEFAULT_CAN_ACTIVATE_PULL FALSE
 
 /* when timestamps drift for more than 40ms we resync. This should
- * be anough to compensate for timestamp rounding errors. */
+ * be enough to compensate for timestamp rounding errors. */
 #define DEFAULT_ALIGNMENT_THRESHOLD   (40 * GST_MSECOND)
 
 /* when clock slaving drift for more than 40ms we resync. This is
@@ -152,10 +152,6 @@ static void gst_audio_base_sink_set_property (GObject * object, guint prop_id,
 static void gst_audio_base_sink_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 
-#if 0
-static GstStateChangeReturn gst_audio_base_sink_async_play (GstBaseSink *
-    basesink);
-#endif
 static GstStateChangeReturn gst_audio_base_sink_change_state (GstElement *
     element, GstStateChange transition);
 static gboolean gst_audio_base_sink_activate_pull (GstBaseSink * basesink,
@@ -164,6 +160,7 @@ static gboolean gst_audio_base_sink_query (GstElement * element, GstQuery *
     query);
 
 static GstClock *gst_audio_base_sink_provide_clock (GstElement * elem);
+static inline void gst_audio_base_sink_reset_sync (GstAudioBaseSink * sink);
 static GstClockTime gst_audio_base_sink_get_time (GstClock * clock,
     GstAudioBaseSink * sink);
 static void gst_audio_base_sink_callback (GstAudioRingBuffer * rbuf,
@@ -215,8 +212,8 @@ gst_audio_base_sink_class_init (GstAudioBaseSinkClass * klass)
 
   g_object_class_install_property (gobject_class, PROP_LATENCY_TIME,
       g_param_spec_int64 ("latency-time", "Latency Time",
-          "The minimum amount of data to write in each iteration in microseconds",
-          1, G_MAXINT64, DEFAULT_LATENCY_TIME,
+          "The minimum amount of data to write in each iteration "
+          "in microseconds", 1, G_MAXINT64, DEFAULT_LATENCY_TIME,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property (gobject_class, PROP_PROVIDE_CLOCK,
@@ -226,7 +223,7 @@ gst_audio_base_sink_class_init (GstAudioBaseSinkClass * klass)
 
   g_object_class_install_property (gobject_class, PROP_SLAVE_METHOD,
       g_param_spec_enum ("slave-method", "Slave Method",
-          "Algorithm to use to match the rate of the masterclock",
+          "Algorithm used to match the rate of the masterclock",
           GST_TYPE_AUDIO_BASE_SINK_SLAVE_METHOD, DEFAULT_SLAVE_METHOD,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
@@ -450,7 +447,7 @@ gst_audio_base_sink_query (GstElement * element, GstQuery * query)
             GST_OBJECT_UNLOCK (basesink);
 
             GST_DEBUG_OBJECT (basesink,
-                "we are not yet negotiated, can't report latency yet");
+                "we are not negotiated, can't report latency yet");
             res = FALSE;
             goto done;
           }
@@ -468,6 +465,7 @@ gst_audio_base_sink_query (GstElement * element, GstQuery * query)
           /* the max latency is the max of the peer, we can delay an infinite
            * amount of time. */
           max_latency = (max_l == -1) ? -1 : (base_latency + max_l);
+
 
           GST_DEBUG_OBJECT (basesink,
               "peer min %" GST_TIME_FORMAT ", our min latency: %"
@@ -555,7 +553,8 @@ gst_audio_base_sink_get_time (GstClock * clock, GstAudioBaseSink * sink)
  *
  * Controls whether @sink will provide a clock or not. If @provide is %TRUE,
  * gst_element_provide_clock() will return a clock that reflects the datarate
- * of @sink. If @provide is %FALSE, gst_element_provide_clock() will return NULL.
+ * of @sink. If @provide is %FALSE, gst_element_provide_clock() will return
+ * NULL.
  */
 void
 gst_audio_base_sink_set_provide_clock (GstAudioBaseSink * sink,
@@ -885,10 +884,7 @@ gst_audio_base_sink_setcaps (GstBaseSink * bsink, GstCaps * caps)
     goto acquire_error;
 
   /* We need to resync since the ringbuffer restarted */
-  sink->priv->avg_skew = -1;
-  sink->next_sample = -1;
-  sink->priv->eos_time = -1;
-  sink->priv->discont_time = -1;
+  gst_audio_base_sink_reset_sync (sink);
 
   if (bsink->pad_mode == GST_PAD_MODE_PUSH) {
     GST_DEBUG_OBJECT (sink, "activate ringbuffer");
@@ -903,7 +899,7 @@ gst_audio_base_sink_setcaps (GstBaseSink * bsink, GstCaps * caps)
       crate_denom);
 
   /* calculate actual latency and buffer times.
-   * FIXME: In 0.11, store the latency_time internally in ns */
+   * FIXME: In 2.0, store the latency_time internally in ns */
   spec->latency_time = gst_util_uint64_scale (spec->segsize,
       (GST_SECOND / GST_USECOND), spec->info.rate * spec->info.bpf);
 
@@ -958,6 +954,16 @@ gst_audio_base_sink_fixate (GstBaseSink * bsink, GstCaps * caps)
   caps = GST_BASE_SINK_CLASS (parent_class)->fixate (bsink, caps);
 
   return caps;
+}
+
+static inline void
+gst_audio_base_sink_reset_sync (GstAudioBaseSink * sink)
+{
+  sink->next_sample = -1;
+  sink->priv->eos_time = -1;
+  sink->priv->discont_time = -1;
+  sink->priv->avg_skew = -1;
+  sink->priv->last_align = 0;
 }
 
 static void
@@ -1073,10 +1079,7 @@ gst_audio_base_sink_event (GstBaseSink * bsink, GstEvent * event)
       break;
     case GST_EVENT_FLUSH_STOP:
       /* always resync on sample after a flush */
-      sink->priv->avg_skew = -1;
-      sink->next_sample = -1;
-      sink->priv->eos_time = -1;
-      sink->priv->discont_time = -1;
+      gst_audio_base_sink_reset_sync (sink);
       if (sink->ringbuffer)
         gst_audio_ring_buffer_set_flushing (sink->ringbuffer, FALSE);
       break;
@@ -1284,8 +1287,8 @@ gst_audio_base_sink_skew_slaving (GstAudioBaseSink * sink,
     driftsamples = (sink->ringbuffer->spec.info.rate * mdrift) / GST_SECOND;
     last_align = sink->priv->last_align;
 
-    /* if we were aligning in the wrong direction or we aligned more than what we
-     * will correct, resync */
+    /* if we were aligning in the wrong direction or we aligned more than what
+     * we will correct, resync */
     if (last_align < 0 || last_align > driftsamples)
       sink->next_sample = -1;
 
@@ -1312,8 +1315,8 @@ gst_audio_base_sink_skew_slaving (GstAudioBaseSink * sink,
     driftsamples = (sink->ringbuffer->spec.info.rate * mdrift) / GST_SECOND;
     last_align = sink->priv->last_align;
 
-    /* if we were aligning in the wrong direction or we aligned more than what we
-     * will correct, resync */
+    /* if we were aligning in the wrong direction or we aligned more than what
+     * we will correct, resync */
     if (last_align > 0 || -last_align > driftsamples)
       sink->next_sample = -1;
 
@@ -1492,10 +1495,7 @@ gst_audio_base_sink_sync_latency (GstBaseSink * bsink, GstMiniObject * obj)
       break;
   }
 
-  sink->priv->avg_skew = -1;
-  sink->next_sample = -1;
-  sink->priv->eos_time = -1;
-  sink->priv->discont_time = -1;
+  gst_audio_base_sink_reset_sync (sink);
 
   return GST_FLOW_OK;
 
@@ -1533,21 +1533,17 @@ gst_audio_base_sink_get_alignment (GstAudioBaseSink * sink,
   gboolean discont = FALSE;
   gint rate;
 
-  /* now try to align the sample to the previous one, first see how big the
-   * difference is. */
-  if (sample_offset >= sink->next_sample)
-    sample_diff = sample_offset - sink->next_sample;
-  else
-    sample_diff = sink->next_sample - sample_offset;
+  /* now try to align the sample to the previous one. */
 
-  rate = GST_AUDIO_INFO_RATE (&ringbuf->spec.info);
+  /* calc align with previous sample and determine how big the
+   * difference is. */
+  align = sink->next_sample - sample_offset;
+  sample_diff = ABS (align);
 
   /* calculate the max allowed drift in units of samples. */
+  rate = GST_AUDIO_INFO_RATE (&ringbuf->spec.info);
   max_sample_diff = gst_util_uint64_scale_int (sink->priv->alignment_threshold,
       rate, GST_SECOND);
-
-  /* calc align with previous sample */
-  align = sink->next_sample - sample_offset;
 
   /* don't align if it means writing behind the read-segment */
   if (sample_diff > headroom && align < 0)
@@ -1784,8 +1780,8 @@ gst_audio_base_sink_render (GstBaseSink * bsink, GstBuffer * buf)
   }
 
   if (G_UNLIKELY (sync_offset != 0)) {
-    /* compensate for ts-offset and delay we know this will not underflow because we
-     * clipped above. */
+    /* compensate for ts-offset and delay. We know this will not underflow
+     * because we clipped above. */
     GST_DEBUG_OBJECT (sink,
         "compensating for sync-offset %" GST_TIME_FORMAT,
         GST_TIME_ARGS (sync_offset));
@@ -2012,9 +2008,9 @@ sync_latency_failed:
  * gst_audio_base_sink_create_ringbuffer:
  * @sink: a #GstAudioBaseSink.
  *
- * Create and return the #GstAudioRingBuffer for @sink. This function will call the
- * ::create_ringbuffer vmethod and will set @sink as the parent of the returned
- * buffer (see gst_object_set_parent()).
+ * Create and return the #GstAudioRingBuffer for @sink. This function will
+ * call the ::create_ringbuffer vmethod and will set @sink as the parent of
+ * the returned buffer (see gst_object_set_parent()).
  *
  * Returns: (transfer none): The new ringbuffer of @sink.
  */
@@ -2050,7 +2046,7 @@ gst_audio_base_sink_callback (GstAudioRingBuffer * rbuf, guint8 * data,
   GST_PAD_STREAM_LOCK (basesink->sinkpad);
 
   /* would be nice to arrange for pad_alloc_buffer to return data -- as it is we
-     will copy twice, once into data, once into DMA */
+   * will copy twice, once into data, once into DMA */
   GST_LOG_OBJECT (basesink, "pulling %u bytes offset %" G_GUINT64_FORMAT
       " to fill audio buffer", len, basesink->offset);
   ret =
@@ -2151,27 +2147,6 @@ gst_audio_base_sink_activate_pull (GstBaseSink * basesink, gboolean active)
   return ret;
 }
 
-#if 0
-/* should be called with the LOCK */
-static GstStateChangeReturn
-gst_audio_base_sink_async_play (GstBaseSink * basesink)
-{
-  GstAudioBaseSink *sink;
-
-  sink = GST_AUDIO_BASE_SINK (basesink);
-
-  GST_DEBUG_OBJECT (sink, "ringbuffer may start now");
-  sink->priv->sync_latency = TRUE;
-  gst_audio_ring_buffer_may_start (sink->ringbuffer, TRUE);
-  if (basesink->pad_mode == GST_PAD_MODE_PULL) {
-    /* we always start the ringbuffer in pull mode immediatly */
-    gst_audio_ring_buffer_start (sink->ringbuffer);
-  }
-
-  return GST_STATE_CHANGE_SUCCESS;
-}
-#endif
-
 static GstStateChangeReturn
 gst_audio_base_sink_change_state (GstElement * element,
     GstStateChange transition)
@@ -2189,10 +2164,7 @@ gst_audio_base_sink_change_state (GstElement * element,
         goto open_failed;
       break;
     case GST_STATE_CHANGE_READY_TO_PAUSED:
-      sink->next_sample = -1;
-      sink->priv->last_align = -1;
-      sink->priv->eos_time = -1;
-      sink->priv->discont_time = -1;
+      gst_audio_base_sink_reset_sync (sink);
       gst_audio_ring_buffer_set_flushing (sink->ringbuffer, FALSE);
       gst_audio_ring_buffer_may_start (sink->ringbuffer, FALSE);
 
@@ -2266,7 +2238,7 @@ gst_audio_base_sink_change_state (GstElement * element,
       gst_audio_ring_buffer_release (sink->ringbuffer);
       break;
     case GST_STATE_CHANGE_READY_TO_NULL:
-      /* we release again here because the aqcuire happens when setting the
+      /* we release again here because the acquire happens when setting the
        * caps, which happens before we commit the state to PAUSED and thus the
        * PAUSED->READY state change (see above, where we release the ringbuffer)
        * might not be called when we get here. */
