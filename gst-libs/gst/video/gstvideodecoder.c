@@ -732,9 +732,10 @@ _new_output_state (GstVideoFormat fmt, guint width, guint height,
     /* Copy over extra fields from reference state */
     tgt->interlace_mode = ref->interlace_mode;
     tgt->flags = ref->flags;
-    tgt->chroma_site = ref->chroma_site;
     /* only copy values that are not unknown so that we don't override the
      * defaults. subclasses should really fill these in when they know. */
+    if (ref->chroma_site)
+      tgt->chroma_site = ref->chroma_site;
     if (ref->colorimetry.range)
       tgt->colorimetry.range = ref->colorimetry.range;
     if (ref->colorimetry.matrix)
@@ -1938,6 +1939,39 @@ gst_video_decoder_flush_parse (GstVideoDecoder * dec, gboolean at_eos)
     /* move it to the front of the decode queue */
     priv->decode = g_list_concat (walk, priv->decode);
 
+    /* this is reverse playback, check if we need to apply some segment
+     * to the output before decoding, as during decoding the segment.rate
+     * must be used to determine if a buffer should be pushed or added to
+     * the output list for reverse pushing.
+     *
+     * The new segment is not immediately pushed here because we must
+     * wait for negotiation to happen before it can be pushed to avoid
+     * pushing a segment before caps event. Negotiation only happens
+     * when finish_frame is called.
+     */
+    for (walk = frame->events; walk;) {
+      GList *cur = walk;
+      GstEvent *event = walk->data;
+
+      walk = g_list_next (walk);
+      if (GST_EVENT_TYPE (event) <= GST_EVENT_SEGMENT) {
+
+        if (GST_EVENT_TYPE (event) == GST_EVENT_SEGMENT) {
+          GstSegment segment;
+
+          GST_DEBUG_OBJECT (dec, "Segment at frame %p %" GST_TIME_FORMAT,
+              frame, GST_TIME_ARGS (GST_BUFFER_PTS (frame->input_buffer)));
+          gst_event_copy_segment (event, &segment);
+          if (segment.format == GST_FORMAT_TIME) {
+            dec->output_segment = segment;
+          }
+        }
+        dec->priv->pending_events =
+            g_list_append (dec->priv->pending_events, event);
+        frame->events = g_list_delete_link (frame->events, cur);
+      }
+    }
+
     /* if we copied a keyframe, flush and decode the decode queue */
     if (GST_VIDEO_CODEC_FRAME_IS_SYNC_POINT (frame)) {
       GST_DEBUG_OBJECT (dec, "found keyframe %p with PTS %" GST_TIME_FORMAT
@@ -2122,13 +2156,30 @@ gst_video_decoder_change_state (GstElement * element, GstStateChange transition)
   ret = GST_ELEMENT_CLASS (parent_class)->change_state (element, transition);
 
   switch (transition) {
-    case GST_STATE_CHANGE_PAUSED_TO_READY:
+    case GST_STATE_CHANGE_PAUSED_TO_READY:{
+      gboolean stopped = TRUE;
+
       GST_VIDEO_DECODER_STREAM_LOCK (decoder);
       gst_video_decoder_reset (decoder, TRUE, TRUE);
       GST_VIDEO_DECODER_STREAM_UNLOCK (decoder);
-      if (decoder_class->stop && !decoder_class->stop (decoder))
+
+      if (decoder_class->stop) {
+        stopped = decoder_class->stop (decoder);
+
+        /* the subclass might have released frames and events from freed frames
+         * are stored in the pending_events list */
+        GST_VIDEO_DECODER_STREAM_LOCK (decoder);
+        g_list_free_full (decoder->priv->pending_events, (GDestroyNotify)
+            gst_event_unref);
+        decoder->priv->pending_events = NULL;
+        GST_VIDEO_DECODER_STREAM_UNLOCK (decoder);
+      }
+
+      if (!stopped)
         goto stop_failed;
+
       break;
+    }
     case GST_STATE_CHANGE_READY_TO_NULL:
       /* close device/library if needed */
       if (decoder_class->close && !decoder_class->close (decoder))
@@ -2428,6 +2479,11 @@ gst_video_decoder_release_frame (GstVideoDecoder * dec,
     gst_video_codec_frame_unref (frame);
     dec->priv->frames = g_list_delete_link (dec->priv->frames, link);
   }
+  if (frame->events) {
+    dec->priv->pending_events =
+        g_list_concat (dec->priv->pending_events, frame->events);
+    frame->events = NULL;
+  }
   GST_VIDEO_DECODER_STREAM_UNLOCK (dec);
 
   /* unref because this function takes ownership */
@@ -2708,6 +2764,33 @@ gst_video_decoder_add_to_frame (GstVideoDecoder * decoder, int n_bytes)
 
   gst_adapter_push (priv->output_adapter, buf);
   GST_VIDEO_DECODER_STREAM_UNLOCK (decoder);
+}
+
+/**
+ * gst_video_decoder_get_pending_frame_size:
+ * @decoder: a #GstVideoDecoder
+ *
+ * Returns the number of bytes previously added to the current frame
+ * by calling gst_video_decoder_add_to_frame().
+ *
+ * Returns: The number of bytes pending for the current frame
+ *
+ * Since: 1.4
+ */
+gsize
+gst_video_decoder_get_pending_frame_size (GstVideoDecoder * decoder)
+{
+  GstVideoDecoderPrivate *priv = decoder->priv;
+  gsize ret;
+
+  GST_VIDEO_DECODER_STREAM_LOCK (decoder);
+  ret = gst_adapter_available (priv->output_adapter);
+  GST_VIDEO_DECODER_STREAM_UNLOCK (decoder);
+
+  GST_LOG_OBJECT (decoder, "Current pending frame has %" G_GSIZE_FORMAT "bytes",
+      ret);
+
+  return ret;
 }
 
 static guint64

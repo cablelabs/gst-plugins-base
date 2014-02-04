@@ -279,6 +279,69 @@ struct _GstAudioDecoderPrivate
   GList *pending_events;
 };
 
+//* Default channel layouts taken from audioconvert */
+static const GstAudioChannelPosition default_positions[8][8] = {
+  /* 1 channel */
+  {
+        GST_AUDIO_CHANNEL_POSITION_MONO,
+      },
+  /* 2 channels */
+  {
+        GST_AUDIO_CHANNEL_POSITION_FRONT_LEFT,
+        GST_AUDIO_CHANNEL_POSITION_FRONT_RIGHT,
+      },
+  /* 3 channels (2.1) */
+  {
+        GST_AUDIO_CHANNEL_POSITION_FRONT_LEFT,
+        GST_AUDIO_CHANNEL_POSITION_FRONT_RIGHT,
+        GST_AUDIO_CHANNEL_POSITION_LFE1,
+      },
+  /* 4 channels (4.0) */
+  {
+        GST_AUDIO_CHANNEL_POSITION_FRONT_LEFT,
+        GST_AUDIO_CHANNEL_POSITION_FRONT_RIGHT,
+        GST_AUDIO_CHANNEL_POSITION_REAR_LEFT,
+        GST_AUDIO_CHANNEL_POSITION_REAR_RIGHT,
+      },
+  /* 5 channels */
+  {
+        GST_AUDIO_CHANNEL_POSITION_FRONT_LEFT,
+        GST_AUDIO_CHANNEL_POSITION_FRONT_RIGHT,
+        GST_AUDIO_CHANNEL_POSITION_REAR_LEFT,
+        GST_AUDIO_CHANNEL_POSITION_REAR_RIGHT,
+        GST_AUDIO_CHANNEL_POSITION_FRONT_CENTER,
+      },
+  /* 6 channels (5.1) */
+  {
+        GST_AUDIO_CHANNEL_POSITION_FRONT_LEFT,
+        GST_AUDIO_CHANNEL_POSITION_FRONT_RIGHT,
+        GST_AUDIO_CHANNEL_POSITION_REAR_LEFT,
+        GST_AUDIO_CHANNEL_POSITION_REAR_RIGHT,
+        GST_AUDIO_CHANNEL_POSITION_FRONT_CENTER,
+        GST_AUDIO_CHANNEL_POSITION_LFE1,
+      },
+  /* 7 channels (6.1) */
+  {
+        GST_AUDIO_CHANNEL_POSITION_FRONT_LEFT,
+        GST_AUDIO_CHANNEL_POSITION_FRONT_RIGHT,
+        GST_AUDIO_CHANNEL_POSITION_REAR_LEFT,
+        GST_AUDIO_CHANNEL_POSITION_REAR_RIGHT,
+        GST_AUDIO_CHANNEL_POSITION_FRONT_CENTER,
+        GST_AUDIO_CHANNEL_POSITION_LFE1,
+        GST_AUDIO_CHANNEL_POSITION_REAR_CENTER,
+      },
+  /* 8 channels (7.1) */
+  {
+        GST_AUDIO_CHANNEL_POSITION_FRONT_LEFT,
+        GST_AUDIO_CHANNEL_POSITION_FRONT_RIGHT,
+        GST_AUDIO_CHANNEL_POSITION_REAR_LEFT,
+        GST_AUDIO_CHANNEL_POSITION_REAR_RIGHT,
+        GST_AUDIO_CHANNEL_POSITION_FRONT_CENTER,
+        GST_AUDIO_CHANNEL_POSITION_LFE1,
+        GST_AUDIO_CHANNEL_POSITION_SIDE_LEFT,
+        GST_AUDIO_CHANNEL_POSITION_SIDE_RIGHT,
+      }
+};
 
 static void gst_audio_decoder_finalize (GObject * object);
 static void gst_audio_decoder_set_property (GObject * object,
@@ -1007,6 +1070,31 @@ send_pending_events (GstAudioDecoder * dec)
   g_list_free (pending_events);
 }
 
+static GstFlowReturn
+check_pending_reconfigure (GstAudioDecoder * dec)
+{
+  GstFlowReturn ret = GST_FLOW_OK;
+  GstAudioDecoderContext *ctx;
+  gboolean needs_reconfigure;
+
+  ctx = &dec->priv->ctx;
+
+  needs_reconfigure = gst_pad_check_reconfigure (dec->srcpad);
+  if (G_UNLIKELY (ctx->output_format_changed ||
+          (GST_AUDIO_INFO_IS_VALID (&ctx->info)
+              && needs_reconfigure))) {
+    if (!gst_audio_decoder_negotiate_unlocked (dec)) {
+      gst_pad_mark_reconfigure (dec->srcpad);
+      if (GST_PAD_IS_FLUSHING (dec->srcpad))
+        ret = GST_FLOW_FLUSHING;
+      else
+        ret = GST_FLOW_NOT_NEGOTIATED;
+    }
+  }
+  return ret;
+}
+
+
 /**
  * gst_audio_decoder_finish_frame:
  * @dec: a #GstAudioDecoder
@@ -1036,7 +1124,6 @@ gst_audio_decoder_finish_frame (GstAudioDecoder * dec, GstBuffer * buf,
   GstClockTime ts, next_ts;
   gsize size;
   GstFlowReturn ret = GST_FLOW_OK;
-  gboolean needs_reconfigure = FALSE;
 
   /* subclass should not hand us no data */
   g_return_val_if_fail (buf == NULL || gst_buffer_get_size (buf) > 0,
@@ -1059,22 +1146,13 @@ gst_audio_decoder_finish_frame (GstAudioDecoder * dec, GstBuffer * buf,
 
   GST_AUDIO_DECODER_STREAM_LOCK (dec);
 
-  needs_reconfigure = gst_pad_check_reconfigure (dec->srcpad);
-  if (buf && G_UNLIKELY (ctx->output_format_changed ||
-          (GST_AUDIO_INFO_IS_VALID (&ctx->info)
-              && needs_reconfigure))) {
-    if (!gst_audio_decoder_negotiate_unlocked (dec)) {
-      gst_pad_mark_reconfigure (dec->srcpad);
-      if (GST_PAD_IS_FLUSHING (dec->srcpad))
-        ret = GST_FLOW_FLUSHING;
-      else
-        ret = GST_FLOW_NOT_NEGOTIATED;
+  if (buf) {
+    ret = check_pending_reconfigure (dec);
+    if (ret == GST_FLOW_FLUSHING || ret == GST_FLOW_NOT_NEGOTIATED)
       goto exit;
-    }
-  }
 
-  if (buf && priv->pending_events) {
-    send_pending_events (dec);
+    if (priv->pending_events)
+      send_pending_events (dec);
   }
 
   /* output shoud be whole number of sample frames */
@@ -1649,6 +1727,21 @@ gst_audio_decoder_chain_reverse (GstAudioDecoder * dec, GstBuffer * buf)
   return result;
 }
 
+static gboolean
+gst_audio_decoder_do_caps (GstAudioDecoder * dec)
+{
+  GstCaps *caps = gst_pad_get_current_caps (dec->sinkpad);
+  if (caps) {
+    if (!gst_audio_decoder_sink_setcaps (dec, caps)) {
+      gst_caps_unref (caps);
+      return FALSE;
+    }
+    gst_caps_unref (caps);
+  }
+  dec->priv->do_caps = FALSE;
+  return TRUE;
+}
+
 static GstFlowReturn
 gst_audio_decoder_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
 {
@@ -1658,15 +1751,9 @@ gst_audio_decoder_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
   dec = GST_AUDIO_DECODER (parent);
 
   if (G_UNLIKELY (dec->priv->do_caps)) {
-    GstCaps *caps = gst_pad_get_current_caps (dec->sinkpad);
-    if (caps) {
-      if (!gst_audio_decoder_sink_setcaps (dec, caps)) {
-        gst_caps_unref (caps);
-        goto not_negotiated;
-      }
-      gst_caps_unref (caps);
+    if (!gst_audio_decoder_do_caps (dec)) {
+      goto not_negotiated;
     }
-    dec->priv->do_caps = FALSE;
   }
 
   if (G_UNLIKELY (!gst_pad_has_current_caps (pad) && dec->priv->needs_format))
@@ -1730,6 +1817,169 @@ gst_audio_decoder_do_byte (GstAudioDecoder * dec)
 {
   return dec->priv->ctx.do_estimate_rate && dec->priv->ctx.info.bpf &&
       dec->priv->ctx.info.rate <= dec->priv->samples_out;
+}
+
+/* Must be called holding the GST_AUDIO_DECODER_STREAM_LOCK */
+static gboolean
+gst_audio_decoder_negotiate_default_caps (GstAudioDecoder * dec)
+{
+  GstCaps *caps;
+  gint i;
+  gint channels = 0;
+  gint rate;
+  guint64 channel_mask = 0;
+  gint caps_size;
+  GstStructure *structure;
+
+  caps = gst_pad_get_current_caps (dec->srcpad);
+  if (caps && !gst_audio_info_from_caps (&dec->priv->ctx.info, caps))
+    return FALSE;
+
+  caps = gst_pad_get_allowed_caps (dec->srcpad);
+  if (!caps || gst_caps_is_empty (caps) || gst_caps_is_any (caps))
+    return FALSE;
+
+  /* before fixating, try to use whatever upstream provided */
+  caps_size = gst_caps_get_size (caps);
+  if (dec->priv->ctx.input_caps) {
+    GstCaps *sinkcaps = dec->priv->ctx.input_caps;
+    GstStructure *structure = gst_caps_get_structure (sinkcaps, 0);
+
+    if (gst_structure_get_int (structure, "rate", &rate)) {
+      for (i = 0; i < caps_size; i++) {
+        gst_structure_set (gst_caps_get_structure (caps, i), "rate",
+            G_TYPE_INT, rate, NULL);
+      }
+    }
+
+    if (gst_structure_get_int (structure, "channels", &channels)) {
+      for (i = 0; i < caps_size; i++) {
+        gst_structure_set (gst_caps_get_structure (caps, i), "channels",
+            G_TYPE_INT, channels, NULL);
+      }
+    }
+
+    if (gst_structure_get (structure, "channel-mask", GST_TYPE_BITMASK,
+            &channel_mask, NULL)) {
+      for (i = 0; i < caps_size; i++) {
+        gst_structure_set (gst_caps_get_structure (caps, i), "channel-mask",
+            GST_TYPE_BITMASK, channel_mask, NULL);
+      }
+    }
+  }
+
+  for (i = 0; i < caps_size; i++) {
+    structure = gst_caps_get_structure (caps, i);
+    gst_structure_fixate_field_nearest_int (structure,
+        "channels", GST_AUDIO_DEF_CHANNELS);
+    gst_structure_fixate_field_nearest_int (structure,
+        "rate", GST_AUDIO_DEF_RATE);
+  }
+  caps = gst_caps_fixate (caps);
+  structure = gst_caps_get_structure (caps, 0);
+
+  /* Need to add a channel-mask if channels > 2 */
+  gst_structure_get_int (structure, "channels", &channels);
+  if (channels > 2 && !gst_structure_has_field (structure, "channel-mask")) {
+    if (channels <= 8) {
+      channel_mask = 0;
+      for (i = 0; i < channels; i++)
+        channel_mask |=
+            G_GUINT64_CONSTANT (1) << default_positions[channels - 1][i];
+
+      gst_structure_set (structure, "channel-mask",
+          GST_TYPE_BITMASK, channel_mask, NULL);
+    } else {
+      GST_WARNING_OBJECT (dec, "No default channel-mask for %d channels",
+          channels);
+    }
+  }
+
+  if (!caps || !gst_audio_info_from_caps (&dec->priv->ctx.info, caps))
+    return FALSE;
+
+  GST_INFO_OBJECT (dec,
+      "Chose default caps %" GST_PTR_FORMAT " for initial gap", caps);
+  gst_caps_unref (caps);
+
+  if (!gst_audio_decoder_negotiate_unlocked (dec)) {
+    GST_INFO_OBJECT (dec, "Failed to negotiate default caps for initial gap");
+    gst_pad_mark_reconfigure (dec->srcpad);
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
+static gboolean
+gst_audio_decoder_handle_gap (GstAudioDecoder * dec, GstEvent * event)
+{
+  gboolean ret;
+  GstClockTime timestamp, duration;
+
+  /* Check if there is a caps pending to be pushed */
+  if (G_UNLIKELY (dec->priv->do_caps)) {
+    if (!gst_audio_decoder_do_caps (dec)) {
+      goto not_negotiated;
+    }
+  }
+
+  /* Ensure we have caps first */
+  GST_AUDIO_DECODER_STREAM_LOCK (dec);
+  if (!GST_AUDIO_INFO_IS_VALID (&dec->priv->ctx.info)) {
+    if (!gst_audio_decoder_negotiate_default_caps (dec)) {
+      GST_ELEMENT_ERROR (dec, STREAM, FORMAT, (NULL),
+          ("Decoder output not negotiated before GAP event."));
+      GST_AUDIO_DECODER_STREAM_UNLOCK (dec);
+      return FALSE;
+    }
+  }
+  GST_AUDIO_DECODER_STREAM_UNLOCK (dec);
+
+  gst_event_parse_gap (event, &timestamp, &duration);
+
+  /* time progressed without data, see if we can fill the gap with
+   * some concealment data */
+  GST_DEBUG_OBJECT (dec,
+      "gap event: plc %d, do_plc %d, position %" GST_TIME_FORMAT
+      " duration %" GST_TIME_FORMAT,
+      dec->priv->plc, dec->priv->ctx.do_plc,
+      GST_TIME_ARGS (timestamp), GST_TIME_ARGS (duration));
+
+  if (dec->priv->plc && dec->priv->ctx.do_plc && dec->input_segment.rate > 0.0) {
+    GstAudioDecoderClass *klass = GST_AUDIO_DECODER_GET_CLASS (dec);
+    GstBuffer *buf;
+
+    /* hand subclass empty frame with duration that needs covering */
+    buf = gst_buffer_new ();
+    GST_BUFFER_TIMESTAMP (buf) = timestamp;
+    GST_BUFFER_DURATION (buf) = duration;
+    /* best effort, not much error handling */
+    gst_audio_decoder_handle_frame (dec, klass, buf);
+    ret = TRUE;
+    gst_event_unref (event);
+  } else {
+    GstFlowReturn flowret;
+
+    /* sub-class doesn't know how to handle empty buffers,
+     * so just try sending GAP downstream */
+    flowret = check_pending_reconfigure (dec);
+    if (flowret == GST_FLOW_OK) {
+      send_pending_events (dec);
+      ret = gst_audio_decoder_push_event (dec, event);
+    } else {
+      ret = FALSE;
+    }
+  }
+  return ret;
+
+  /* ERRORS */
+not_negotiated:
+  {
+    GST_ELEMENT_ERROR (dec, CORE, NEGOTIATION, (NULL),
+        ("decoder not initialized"));
+    return FALSE;
+  }
 }
 
 static gboolean
@@ -1819,39 +2069,9 @@ gst_audio_decoder_sink_eventfunc (GstAudioDecoder * dec, GstEvent * event)
       ret = TRUE;
       break;
     }
-    case GST_EVENT_GAP:{
-      GstClockTime timestamp, duration;
-      gst_event_parse_gap (event, &timestamp, &duration);
-
-      /* time progressed without data, see if we can fill the gap with
-       * some concealment data */
-      GST_DEBUG_OBJECT (dec,
-          "gap event: plc %d, do_plc %d, position %" GST_TIME_FORMAT
-          " duration %" GST_TIME_FORMAT,
-          dec->priv->plc, dec->priv->ctx.do_plc,
-          GST_TIME_ARGS (timestamp), GST_TIME_ARGS (duration));
-      if (dec->priv->plc && dec->priv->ctx.do_plc &&
-          dec->input_segment.rate > 0.0) {
-        GstAudioDecoderClass *klass;
-        GstBuffer *buf;
-
-        klass = GST_AUDIO_DECODER_GET_CLASS (dec);
-        /* hand subclass empty frame with duration that needs covering */
-        buf = gst_buffer_new ();
-        GST_BUFFER_TIMESTAMP (buf) = timestamp;
-        GST_BUFFER_DURATION (buf) = duration;
-        /* best effort, not much error handling */
-        gst_audio_decoder_handle_frame (dec, klass, buf);
-        ret = TRUE;
-        gst_event_unref (event);
-      } else {
-        /* FIXME: sub-class doesn't know how to handle empty buffers,
-         * so just try sending GAP downstream */
-        send_pending_events (dec);
-        ret = gst_audio_decoder_push_event (dec, event);
-      }
+    case GST_EVENT_GAP:
+      ret = gst_audio_decoder_handle_gap (dec, event);
       break;
-    }
     case GST_EVENT_FLUSH_STOP:
       GST_AUDIO_DECODER_STREAM_LOCK (dec);
       /* prepare for fresh start */
@@ -1885,9 +2105,6 @@ gst_audio_decoder_sink_eventfunc (GstAudioDecoder * dec, GstEvent * event)
 
     case GST_EVENT_CAPS:
     {
-      GstCaps *caps;
-
-      gst_event_parse_caps (event, &caps);
       ret = TRUE;
       dec->priv->do_caps = TRUE;
       gst_event_unref (event);

@@ -65,16 +65,23 @@ typedef enum {
 /**
  * GstRTSPProfile:
  * @GST_RTSP_PROFILE_UNKNOWN: invalid profile
- * @GST_RTSP_PROFILE_AVP: the Audio/Visual profile
- * @GST_RTSP_PROFILE_SAVP: the secure Audio/Visual profile
+ * @GST_RTSP_PROFILE_AVP: the Audio/Visual profile (RFC 3551)
+ * @GST_RTSP_PROFILE_SAVP: the secure Audio/Visual profile (RFC 3711)
+ * @GST_RTSP_PROFILE_AVPF: the Audio/Visual profile with feedback (RFC 4585)
+ * @GST_RTSP_PROFILE_SAVPF: the secure Audio/Visual profile with feedback (RFC 5124)
  *
  * The transfer profile to use.
  */
 typedef enum {
   GST_RTSP_PROFILE_UNKNOWN =  0,
   GST_RTSP_PROFILE_AVP     = (1 << 0),
-  GST_RTSP_PROFILE_SAVP    = (1 << 1)
+  GST_RTSP_PROFILE_SAVP    = (1 << 1),
+  GST_RTSP_PROFILE_AVPF    = (1 << 2),
+  GST_RTSP_PROFILE_SAVPF   = (1 << 3),
 } GstRTSPProfile;
+
+#define GST_TYPE_RTSP_PROFILE (gst_rtsp_profile_get_type())
+GType gst_rtsp_profile_get_type (void);
 
 /**
  * GstRTSPLowerTrans:
@@ -171,6 +178,9 @@ gchar*             gst_rtsp_transport_as_text      (GstRTSPTransport *transport)
 
 GstRTSPResult      gst_rtsp_transport_get_mime     (GstRTSPTransMode trans, const gchar **mime);
 GstRTSPResult      gst_rtsp_transport_get_manager  (GstRTSPTransMode trans, const gchar **manager, guint option);
+
+GstRTSPResult      gst_rtsp_transport_get_media_type (GstRTSPTransport *transport,
+                                                      const gchar **media_type);
 
 GstRTSPResult      gst_rtsp_transport_free         (GstRTSPTransport *transport);
 

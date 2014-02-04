@@ -216,10 +216,7 @@ _encoding_profile_get_property (GObject * object, guint prop_id,
 
   switch (prop_id) {
     case PROP_RESTRICTION_CAPS:
-    {
       gst_value_set_caps (value, prof->restriction);
-      break;
-    }
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -237,6 +234,7 @@ _encoding_profile_set_property (GObject * object, guint prop_id,
     case PROP_RESTRICTION_CAPS:
       gst_encoding_profile_set_restriction (prof, gst_caps_copy
           (gst_value_get_caps (value)));
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -473,7 +471,7 @@ gst_encoding_profile_set_presence (GstEncodingProfile * profile, guint presence)
  * @restriction: (transfer full): the restriction to apply
  *
  * Set the restriction #GstCaps to apply before the encoder
- * that will be used in the profile. See gst_encoding_profile_set_restriction()
+ * that will be used in the profile. See gst_encoding_profile_get_restriction()
  * for more about restrictions. Does not apply to #GstEncodingContainerProfile.
  */
 void

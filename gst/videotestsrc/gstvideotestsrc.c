@@ -320,9 +320,14 @@ gst_video_test_src_src_fixate (GstBaseSrc * bsrc, GstCaps * caps)
   gst_structure_fixate_field_nearest_int (structure, "width", 320);
   gst_structure_fixate_field_nearest_int (structure, "height", 240);
   gst_structure_fixate_field_nearest_fraction (structure, "framerate", 30, 1);
+
   if (gst_structure_has_field (structure, "pixel-aspect-ratio"))
     gst_structure_fixate_field_nearest_fraction (structure,
         "pixel-aspect-ratio", 1, 1);
+  else
+    gst_structure_set (structure, "pixel-aspect-ratio", GST_TYPE_FRACTION, 1, 1,
+        NULL);
+
   if (gst_structure_has_field (structure, "colorimetry"))
     gst_structure_fixate_field_string (structure, "colorimetry", "bt601");
   if (gst_structure_has_field (structure, "chroma-site"))
@@ -331,6 +336,9 @@ gst_video_test_src_src_fixate (GstBaseSrc * bsrc, GstCaps * caps)
   if (gst_structure_has_field (structure, "interlace-mode"))
     gst_structure_fixate_field_string (structure, "interlace-mode",
         "progressive");
+  else
+    gst_structure_set (structure, "interlace-mode", G_TYPE_STRING,
+        "progressive", NULL);
 
   caps = GST_BASE_SRC_CLASS (parent_class)->fixate (bsrc, caps);
 
@@ -616,6 +624,7 @@ gst_video_test_src_decide_allocation (GstBaseSrc * bsrc, GstQuery * query)
   gboolean update;
   guint size, min, max;
   GstStructure *config;
+  GstCaps *caps = NULL;
 
   videotestsrc = GST_VIDEO_TEST_SRC (bsrc);
 
@@ -641,6 +650,11 @@ gst_video_test_src_decide_allocation (GstBaseSrc * bsrc, GstQuery * query)
   }
 
   config = gst_buffer_pool_get_config (pool);
+
+  gst_query_parse_allocation (query, &caps, NULL);
+  if (caps)
+    gst_buffer_pool_config_set_params (config, caps, size, min, max);
+
   if (gst_query_find_allocation_meta (query, GST_VIDEO_META_API_TYPE, NULL)) {
     gst_buffer_pool_config_add_option (config,
         GST_BUFFER_POOL_OPTION_VIDEO_META);
@@ -775,11 +789,25 @@ gst_video_test_src_query (GstBaseSrc * bsrc, GstQuery * query)
     }
     case GST_QUERY_DURATION:{
       if (bsrc->num_buffers != -1) {
-        gint64 dur = gst_util_uint64_scale_int_round (bsrc->num_buffers
-            * GST_SECOND, src->info.fps_d, src->info.fps_n);
-        res = TRUE;
-        gst_query_set_duration (query, GST_FORMAT_TIME, dur);
-        break;
+        GstFormat format;
+
+        gst_query_parse_duration (query, &format, NULL);
+        switch (format) {
+          case GST_FORMAT_TIME:{
+            gint64 dur = gst_util_uint64_scale_int_round (bsrc->num_buffers
+                * GST_SECOND, src->info.fps_d, src->info.fps_n);
+            res = TRUE;
+            gst_query_set_duration (query, GST_FORMAT_TIME, dur);
+            goto done;
+          }
+          case GST_FORMAT_BYTES:
+            res = TRUE;
+            gst_query_set_duration (query, GST_FORMAT_BYTES,
+                bsrc->num_buffers * src->info.size);
+            goto done;
+          default:
+            break;
+        }
       }
       /* fall through */
     }
@@ -787,6 +815,7 @@ gst_video_test_src_query (GstBaseSrc * bsrc, GstQuery * query)
       res = GST_BASE_SRC_CLASS (parent_class)->query (bsrc, query);
       break;
   }
+done:
   return res;
 }
 

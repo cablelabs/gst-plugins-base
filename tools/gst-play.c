@@ -23,6 +23,8 @@
 #include "config.h"
 #endif
 
+#include <locale.h>
+
 #include <gst/gst.h>
 #include <gst/gst-i18n-app.h>
 #include <gst/pbutils/pbutils.h>
@@ -170,6 +172,11 @@ play_bus_msg (GstBus * bus, GstMessage * msg, gpointer user_data)
 
   switch (GST_MESSAGE_TYPE (msg)) {
     case GST_MESSAGE_ASYNC_DONE:
+
+      /* dump graph on preroll */
+      GST_DEBUG_BIN_TO_DOT_FILE_WITH_TS (GST_BIN (play->playbin),
+          GST_DEBUG_GRAPH_SHOW_ALL, "gst-play.async-done");
+
       g_print ("Prerolled.\r");
       if (play->missing != NULL && play_install_missing_plugins (play)) {
         g_print ("New plugins installed, trying again...\n");
@@ -205,6 +212,12 @@ play_bus_msg (GstBus * bus, GstMessage * msg, gpointer user_data)
       }
       break;
     }
+    case GST_MESSAGE_CLOCK_LOST:{
+      g_print (_("Clock lost, selecting a new one\n"));
+      gst_element_set_state (play->playbin, GST_STATE_PAUSED);
+      gst_element_set_state (play->playbin, GST_STATE_PLAYING);
+      break;
+    }
     case GST_MESSAGE_LATENCY:
       g_print ("Redistribute latency...\n");
       gst_bin_recalculate_latency (GST_BIN (play->playbin));
@@ -238,6 +251,10 @@ play_bus_msg (GstBus * bus, GstMessage * msg, gpointer user_data)
       GError *err;
       gchar *dbg = NULL;
 
+      /* dump graph on warning */
+      GST_DEBUG_BIN_TO_DOT_FILE_WITH_TS (GST_BIN (play->playbin),
+          GST_DEBUG_GRAPH_SHOW_ALL, "gst-play.warning");
+
       gst_message_parse_warning (msg, &err, &dbg);
       g_printerr ("WARNING %s\n", err->message);
       if (dbg != NULL)
@@ -249,6 +266,10 @@ play_bus_msg (GstBus * bus, GstMessage * msg, gpointer user_data)
     case GST_MESSAGE_ERROR:{
       GError *err;
       gchar *dbg;
+
+      /* dump graph on error */
+      GST_DEBUG_BIN_TO_DOT_FILE_WITH_TS (GST_BIN (play->playbin),
+          GST_DEBUG_GRAPH_SHOW_ALL, "gst-play.error");
 
       gst_message_parse_error (msg, &err, &dbg);
       g_printerr ("ERROR %s for %s\n", err->message, play->uris[play->cur_idx]);
@@ -623,6 +644,8 @@ main (int argc, char **argv)
     {G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &filenames, NULL},
     {NULL}
   };
+
+  setlocale (LC_ALL, "");
 
 #ifdef ENABLE_NLS
   bindtextdomain (GETTEXT_PACKAGE, LOCALEDIR);

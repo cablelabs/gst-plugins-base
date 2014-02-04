@@ -1,6 +1,8 @@
 .dirstamp
 audio
 audiocdsrc
+audiodecoder
+audioencoder
 discoverer
 fft
 gstlibscpp
@@ -16,4 +18,6 @@ sdp
 tag
 utils
 video
+videodecoder
+videoencoder
 xmpwriter

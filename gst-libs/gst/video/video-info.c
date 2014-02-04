@@ -27,6 +27,7 @@
 #include <stdio.h>
 
 #include "video-info.h"
+#include "video-tile.h"
 
 static int fill_planes (GstVideoInfo * info);
 
@@ -79,6 +80,8 @@ static const GstVideoColorimetry default_color[] = {
  * @height: a height
  *
  * Set the default info for a video frame of @format and @width and @height.
+ *
+ * Note: This initializes @info first, no values are preserved.
  */
 void
 gst_video_info_set_format (GstVideoInfo * info, GstVideoFormat format,
@@ -88,6 +91,8 @@ gst_video_info_set_format (GstVideoInfo * info, GstVideoFormat format,
 
   g_return_if_fail (info != NULL);
   g_return_if_fail (format != GST_VIDEO_FORMAT_UNKNOWN);
+
+  gst_video_info_init (info);
 
   finfo = gst_video_format_get_info (format);
 
@@ -110,7 +115,6 @@ gst_video_info_set_format (GstVideoInfo * info, GstVideoFormat format,
   }
 
   fill_planes (info);
-  memset (&info->_gst_reserved, 0xff, sizeof (info->_gst_reserved));
 }
 
 static const gchar *interlace_mode[] = {
@@ -570,6 +574,18 @@ fill_planes (GstVideoInfo * info)
       info->offset[2] = info->offset[1] * 2;
       info->size = info->stride[0] * height * 3;
       break;
+    case GST_VIDEO_FORMAT_NV12_64Z32:
+      info->stride[0] =
+          GST_VIDEO_TILE_MAKE_STRIDE (GST_ROUND_UP_128 (width) / 64,
+          GST_ROUND_UP_32 (height) / 32);
+      info->stride[1] =
+          GST_VIDEO_TILE_MAKE_STRIDE (GST_ROUND_UP_128 (width) / 64,
+          GST_ROUND_UP_64 (height) / 64);
+      info->offset[0] = 0;
+      info->offset[1] = info->stride[0] * GST_ROUND_UP_32 (height);
+      info->size =
+          info->offset[1] + info->stride[0] * GST_ROUND_UP_64 (height) / 2;
+      break;
     case GST_VIDEO_FORMAT_ENCODED:
       break;
     case GST_VIDEO_FORMAT_UNKNOWN:
@@ -766,8 +782,9 @@ gst_video_info_align (GstVideoInfo * info, GstVideoAlignment * align)
   do {
     GST_LOG ("padded dimension %u-%u", padded_width, padded_height);
 
-    gst_video_info_set_format (info, GST_VIDEO_INFO_FORMAT (info),
-        padded_width, padded_height);
+    info->width = padded_width;
+    info->height = padded_height;
+    fill_planes (info);
 
     /* check alignment */
     aligned = TRUE;

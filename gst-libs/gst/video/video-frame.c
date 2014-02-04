@@ -28,6 +28,7 @@
 
 #include <gst/video/video.h>
 #include "video-frame.h"
+#include "video-tile.h"
 #include "gstvideometa.h"
 
 GST_DEBUG_CATEGORY_EXTERN (GST_CAT_PERFORMANCE);
@@ -217,8 +218,9 @@ gst_video_frame_copy_plane (GstVideoFrame * dest, const GstVideoFrame * src,
 {
   const GstVideoInfo *sinfo;
   GstVideoInfo *dinfo;
-  guint w, h, j;
+  const GstVideoFormatInfo *finfo;
   guint8 *sp, *dp;
+  guint w, h;
   gint ss, ds;
 
   g_return_val_if_fail (dest != NULL, FALSE);
@@ -228,15 +230,21 @@ gst_video_frame_copy_plane (GstVideoFrame * dest, const GstVideoFrame * src,
   dinfo = &dest->info;
 
   g_return_val_if_fail (dinfo->finfo->format == sinfo->finfo->format, FALSE);
+
+  finfo = dinfo->finfo;
+
   g_return_val_if_fail (dinfo->width == sinfo->width
       && dinfo->height == sinfo->height, FALSE);
-  g_return_val_if_fail (dinfo->finfo->n_planes > plane, FALSE);
+  g_return_val_if_fail (finfo->n_planes > plane, FALSE);
 
   sp = src->data[plane];
   dp = dest->data[plane];
 
-  ss = sinfo->stride[plane];
-  ds = dinfo->stride[plane];
+  if (GST_VIDEO_FORMAT_INFO_HAS_PALETTE (finfo) && plane == 1) {
+    /* copy the palette and we're done */
+    memcpy (dp, sp, 256 * 4);
+    return TRUE;
+  }
 
   /* FIXME. assumes subsampling of component N is the same as plane N, which is
    * currently true for all formats we have but it might not be in the future. */
@@ -244,13 +252,58 @@ gst_video_frame_copy_plane (GstVideoFrame * dest, const GstVideoFrame * src,
       plane) * GST_VIDEO_FRAME_COMP_PSTRIDE (dest, plane);
   h = GST_VIDEO_FRAME_COMP_HEIGHT (dest, plane);
 
-  GST_CAT_DEBUG (GST_CAT_PERFORMANCE, "copy plane %d, w:%d h:%d ", plane, w, h);
+  ss = GST_VIDEO_INFO_PLANE_STRIDE (sinfo, plane);
+  ds = GST_VIDEO_INFO_PLANE_STRIDE (dinfo, plane);
 
-  for (j = 0; j < h; j++) {
-    memcpy (dp, sp, w);
-    dp += ds;
-    sp += ss;
+  if (GST_VIDEO_FORMAT_INFO_IS_TILED (finfo)) {
+    gint tile_size;
+    gint sx_tiles, sy_tiles, dx_tiles, dy_tiles;
+    guint i, j, ws, hs, ts;
+    GstVideoTileMode mode;
+
+    ws = GST_VIDEO_FORMAT_INFO_TILE_WS (finfo);
+    hs = GST_VIDEO_FORMAT_INFO_TILE_HS (finfo);
+    ts = ws + hs;
+
+    tile_size = 1 << ts;
+
+    mode = GST_VIDEO_FORMAT_INFO_TILE_MODE (finfo);
+
+    sx_tiles = GST_VIDEO_TILE_X_TILES (ss);
+    sy_tiles = GST_VIDEO_TILE_Y_TILES (ss);
+
+    dx_tiles = GST_VIDEO_TILE_X_TILES (ds);
+    dy_tiles = GST_VIDEO_TILE_Y_TILES (ds);
+
+    /* this is the amount of tiles to copy */
+    w = ((w - 1) >> ws) + 1;
+    h = ((h - 1) >> hs) + 1;
+
+    /* FIXME can possibly do better when no retiling is needed, it depends on
+     * the stride and the tile_size */
+    for (j = 0; j < h; j++) {
+      for (i = 0; i < w; i++) {
+        guint si, di;
+
+        si = gst_video_tile_get_index (mode, i, j, sx_tiles, sy_tiles);
+        di = gst_video_tile_get_index (mode, i, j, dx_tiles, dy_tiles);
+
+        memcpy (dp + (di << ts), sp + (si << ts), tile_size);
+      }
+    }
+  } else {
+    guint j;
+
+    GST_CAT_DEBUG (GST_CAT_PERFORMANCE, "copy plane %d, w:%d h:%d ", plane, w,
+        h);
+
+    for (j = 0; j < h; j++) {
+      memcpy (dp, sp, w);
+      dp += ds;
+      sp += ss;
+    }
   }
+
   return TRUE;
 }
 
@@ -281,10 +334,6 @@ gst_video_frame_copy (GstVideoFrame * dest, const GstVideoFrame * src)
       && dinfo->height == sinfo->height, FALSE);
 
   n_planes = dinfo->finfo->n_planes;
-  if (GST_VIDEO_FORMAT_INFO_HAS_PALETTE (sinfo->finfo)) {
-    memcpy (dest->data[1], src->data[1], 256 * 4);
-    n_planes = 1;
-  }
 
   for (i = 0; i < n_planes; i++)
     gst_video_frame_copy_plane (dest, src, i);

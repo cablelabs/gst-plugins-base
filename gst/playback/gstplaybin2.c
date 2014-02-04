@@ -589,8 +589,8 @@ enum
   LAST_SIGNAL
 };
 
-static GstStaticCaps raw_audio_caps = GST_STATIC_CAPS ("audio/x-raw");
-static GstStaticCaps raw_video_caps = GST_STATIC_CAPS ("video/x-raw");
+static GstStaticCaps raw_audio_caps = GST_STATIC_CAPS ("audio/x-raw(ANY)");
+static GstStaticCaps raw_video_caps = GST_STATIC_CAPS ("video/x-raw(ANY)");
 
 static void gst_play_bin_class_init (GstPlayBinClass * klass);
 static void gst_play_bin_init (GstPlayBin * playbin);
@@ -2687,7 +2687,7 @@ gst_play_bin_handle_message (GstBin * bin, GstMessage * msg)
     /* Ignore async state changes from the uridecodebin children,
      * see bug #602000. */
     group = playbin->curr_group;
-    if (src && (group = playbin->curr_group) &&
+    if (src && group &&
         ((group->uridecodebin && src == GST_OBJECT_CAST (group->uridecodebin))
             || (group->suburidecodebin
                 && src == GST_OBJECT_CAST (group->suburidecodebin)))) {
@@ -3824,6 +3824,7 @@ create_decoders_list (GList * factory_list, GSequence * avelements)
 {
   GList *dec_list = NULL, *tmp;
   GList *ave_list = NULL;
+  GList *ave_free_list = NULL;
   GstAVElement *ave, *best_ave;
 
   g_return_val_if_fail (factory_list != NULL, NULL);
@@ -3833,8 +3834,10 @@ create_decoders_list (GList * factory_list, GSequence * avelements)
     GstElementFactory *factory = (GstElementFactory *) tmp->data;
 
     /* if there are parsers or sink elements, add them first */
-    if (!gst_element_factory_list_is_type (factory,
-            GST_ELEMENT_FACTORY_TYPE_DECODER)) {
+    if (gst_element_factory_list_is_type (factory,
+            GST_ELEMENT_FACTORY_TYPE_PARSER) ||
+        gst_element_factory_list_is_type (factory,
+            GST_ELEMENT_FACTORY_TYPE_SINK)) {
       dec_list = g_list_prepend (dec_list, factory);
     } else {
       GSequenceIter *seq_iter;
@@ -3850,7 +3853,10 @@ create_decoders_list (GList * factory_list, GSequence * avelements)
         /* There's at least raw */
         ave->n_comm_cf = 1;
 
-        dec_list = g_list_prepend (dec_list, factory);
+        ave_list = g_list_prepend (ave_list, ave);
+
+        /* We need to free these later */
+        ave_free_list = g_list_prepend (ave_free_list, ave);
         continue;
       }
 
@@ -3887,6 +3893,10 @@ create_decoders_list (GList * factory_list, GSequence * avelements)
     dec_list = g_list_prepend (dec_list, ave->dec);
   }
   g_list_free (ave_list);
+
+  for (tmp = ave_free_list; tmp; tmp = tmp->next)
+    g_slice_free (GstAVElement, tmp->data);
+  g_list_free (ave_free_list);
 
   dec_list = g_list_reverse (dec_list);
 
