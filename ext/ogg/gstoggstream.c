@@ -371,7 +371,7 @@ packet_duration_constant (GstOggStream * pad, ogg_packet * packet)
 }
 
 /* helper: extracts tags from vorbis comment ogg packet.
- * Returns result in *tags after free'ing existing *tags (if any) */
+ * Returns result in *tags (inserting into existing tags if necessary) */
 static gboolean
 tag_list_from_vorbiscomment_packet (ogg_packet * packet,
     const guint8 * id_data, const guint id_data_length, GstTagList ** tags)
@@ -399,9 +399,11 @@ tag_list_from_vorbiscomment_packet (ogg_packet * packet,
   }
 
 exit:
-  if (*tags)
-    gst_tag_list_unref (*tags);
-  *tags = list;
+  if (*tags) {
+    gst_tag_list_insert (*tags, list, GST_TAG_MERGE_REPLACE);
+    gst_tag_list_unref (list);
+  } else
+    *tags = list;
 
   return ret;
 }
@@ -1303,6 +1305,7 @@ gst_ogg_map_add_fisbone (GstOggStream * pad, GstOggStream * skel_pad,
     return FALSE;
   }
 
+  /* See: https://wiki.xiph.org/Ogg_Skeleton_4#Ogg_Skeleton_version_4.0_Format_Specification */
   /* skip "fisbone\0" + headers offset + serialno + num headers */
   data += 8 + 4 + 4 + 4;
 
@@ -1334,6 +1337,34 @@ gst_ogg_map_add_fisbone (GstOggStream * pad, GstOggStream * skel_pad,
       " preroll: %" G_GUINT32_FORMAT " granuleshift: %d)",
       GST_TIME_ARGS (start_time),
       pad->granulerate_n, pad->granulerate_d, pad->preroll, pad->granuleshift);
+
+  for (int start = 32, end; start < size; start = end + 2) {
+    for (end = start; end < size - 1; ++end) {
+      if (data[end] == '\r' && data[end + 1] == '\n') {
+        gchar *header = g_strndup ((const gchar *) data + start, end - start);
+        gchar *seperator = strchr (header, ':');
+        if (seperator[0] && seperator[1] == ' ') {
+          gchar *value = seperator + 2;
+          *seperator = 0;
+
+          /* see: https://wiki.xiph.org/SkeletonHeaders#Role */
+          if (!strcmp (header, "Name")) {
+            GST_INFO ("Using ogg name header %s for track id", value);
+            if (!pad->taglist)
+              pad->taglist = gst_tag_list_new_empty ();
+            gst_tag_list_add (pad->taglist, GST_TAG_MERGE_REPLACE,
+                GST_TAG_TRACK_ID, value, NULL);
+          }
+        } else {
+          GST_WARNING ("invalid skeleton header found: %s", header);
+        }
+        g_free (header);
+
+        start = end;
+        break;
+      }
+    }
+  }
 
   if (p_start_time)
     *p_start_time = start_time;

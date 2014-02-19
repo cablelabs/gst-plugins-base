@@ -4808,6 +4808,8 @@ gst_ogg_demux_plugin_init (GstPlugin * plugin)
   bind_textdomain_codeset (GETTEXT_PACKAGE, "UTF-8");
 #endif
 
+  gst_tag_register_musicbrainz_tags ();
+
   return gst_element_register (plugin, "oggdemux", GST_RANK_PRIMARY,
       GST_TYPE_OGG_DEMUX);
 }
