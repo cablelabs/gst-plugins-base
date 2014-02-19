@@ -96,6 +96,15 @@ G_BEGIN_DECLS
  */
 #define GST_TAG_MUSICAL_KEY                   "musical-key"
 
+/**
+ * GST_TAG_TRACK_ID:
+ *
+ * The HTML5 track id. (string)
+ *
+ * See: http://www.w3.org/html/wg/drafts/html/CR/embedded-content-0.html#dom-audiotrack-id
+ *      http://www.w3.org/html/wg/drafts/html/CR/embedded-content-0.html#dom-texttrack-id
+ */
+#define GST_TAG_TRACK_ID "track-id"
 
 /* CDDA tags */
 
