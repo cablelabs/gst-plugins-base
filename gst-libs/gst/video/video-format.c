@@ -27,19 +27,6 @@
 #include <stdio.h>
 
 #include "video-format.h"
-
-/**
- * SECTION:gstvideo
- * @short_description: Support library for video operations
- *
- * <refsect2>
- * <para>
- * This library contains some helper functions and includes the
- * videosink and videofilter base classes.
- * </para>
- * </refsect2>
- */
-
 #include "video-orc.h"
 
 /* Line conversion to AYUV */
@@ -2776,8 +2763,8 @@ gst_video_format_get_info (GstVideoFormat format)
  * Get the default palette of @format. This the palette used in the pack
  * function for paletted formats.
  *
- * Returns: the default palette of @format or %NULL when @format does not have a
- * palette.
+ * Returns: (transfer none): the default palette of @format or %NULL when
+ * @format does not have a palette.
  *
  * Since: 1.2
  */

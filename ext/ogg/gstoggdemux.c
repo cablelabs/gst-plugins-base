@@ -524,6 +524,8 @@ gst_ogg_demux_chain_peer (GstOggPad * pad, ogg_packet * packet,
   GST_DEBUG_OBJECT (ogg,
       "%p streaming to peer serial %08x", pad, pad->map.serialno);
 
+  gst_ogg_stream_update_stats (&pad->map, packet);
+
   if (pad->map.is_ogm) {
     const guint8 *data;
     long bytes;
@@ -1373,7 +1375,7 @@ gst_ogg_demux_seek_back_after_push_duration_check_unlock (GstOggDemux * ogg)
     GST_INFO_OBJECT (ogg, "Seeking back to 0 after duration check");
     event = gst_event_new_seek (1.0, GST_FORMAT_BYTES,
         GST_SEEK_FLAG_ACCURATE | GST_SEEK_FLAG_FLUSH,
-        GST_SEEK_TYPE_SET, 1, GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);
+        GST_SEEK_TYPE_SET, 1, GST_SEEK_TYPE_SET, GST_CLOCK_TIME_NONE);
     if (!gst_pad_push_event (ogg->sinkpad, event)) {
       GST_WARNING_OBJECT (ogg, "Failed seeking back to start");
       return GST_FLOW_ERROR;
@@ -4514,7 +4516,6 @@ gst_ogg_demux_loop (GstOggPad * pad)
 {
   GstOggDemux *ogg;
   GstFlowReturn ret;
-  GstEvent *event;
 
   ogg = GST_OGG_DEMUX (GST_OBJECT_PARENT (pad));
 
@@ -4532,14 +4533,10 @@ gst_ogg_demux_loop (GstOggPad * pad)
 
     GST_OBJECT_LOCK (ogg);
     ogg->running = TRUE;
-    event = ogg->event;
-    ogg->event = NULL;
     GST_OBJECT_UNLOCK (ogg);
 
     /* and seek to configured positions without FLUSH */
-    res = gst_ogg_demux_perform_seek_pull (ogg, event);
-    if (event)
-      gst_event_unref (event);
+    res = gst_ogg_demux_perform_seek_pull (ogg, NULL);
 
     if (!res)
       goto seek_failed;
