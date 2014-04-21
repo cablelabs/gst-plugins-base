@@ -67,7 +67,8 @@ typedef enum
   GST_PLAY_FLAG_DOWNLOAD = (1 << 7),
   GST_PLAY_FLAG_BUFFERING = (1 << 8),
   GST_PLAY_FLAG_DEINTERLACE = (1 << 9),
-  GST_PLAY_FLAG_SOFT_COLORBALANCE = (1 << 10)
+  GST_PLAY_FLAG_SOFT_COLORBALANCE = (1 << 10),
+  GST_PLAY_FLAG_FORCE_FILTERS = (1 << 11),
 } GstPlayFlags;
 
 /* configuration */
@@ -2416,7 +2417,7 @@ buffer_size_activate_cb (GtkEntry * entry, PlaybackApp * app)
 
   text = gtk_entry_get_text (entry);
   if (text != NULL && *text != '\0') {
-    gint v;
+    gint64 v;
     gchar *endptr;
 
     v = g_ascii_strtoll (text, &endptr, 10);
@@ -2467,7 +2468,7 @@ connection_speed_activate_cb (GtkEntry * entry, PlaybackApp * app)
 
   text = gtk_entry_get_text (entry);
   if (text != NULL && *text != '\0') {
-    guint v;
+    gint64 v;
     gchar *endptr;
 
     v = g_ascii_strtoll (text, &endptr, 10);
@@ -2955,6 +2956,7 @@ create_ui (PlaybackApp * app)
   gtk_scale_set_digits (GTK_SCALE (app->seek_scale), 2);
   gtk_scale_set_value_pos (GTK_SCALE (app->seek_scale), GTK_POS_RIGHT);
   gtk_range_set_show_fill_level (GTK_RANGE (app->seek_scale), TRUE);
+  gtk_range_set_restrict_to_fill_level (GTK_RANGE (app->seek_scale), FALSE);
   gtk_range_set_fill_level (GTK_RANGE (app->seek_scale), N_GRAD);
 
   g_signal_connect (app->seek_scale, "button_press_event",

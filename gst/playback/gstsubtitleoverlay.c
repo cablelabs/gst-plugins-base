@@ -220,25 +220,14 @@ static const gchar *const _sub_pad_names[] = { "subpicture", "subpicture_sink",
   "subtitle_sink", "subtitle"
 };
 
-static inline gboolean
-_is_raw_video (GstStructure * s)
-{
-  const gchar *name;
-
-  name = gst_structure_get_name (s);
-
-  if (g_str_equal (name, "video/x-raw"))
-    return TRUE;
-  return FALSE;
-}
-
 static gboolean
 _is_video_pad (GstPad * pad, gboolean * hw_accelerated)
 {
   GstPad *peer = gst_pad_get_peer (pad);
   GstCaps *caps;
-  gboolean ret;
+  gboolean ret = FALSE;
   const gchar *name;
+  guint i;
 
   if (peer) {
     caps = gst_pad_get_current_caps (peer);
@@ -250,21 +239,23 @@ _is_video_pad (GstPad * pad, gboolean * hw_accelerated)
     caps = gst_pad_query_caps (pad, NULL);
   }
 
-  name = gst_structure_get_name (gst_caps_get_structure (caps, 0));
-  if (g_str_equal (name, "video/x-raw")) {
-    ret = TRUE;
-    if (hw_accelerated)
-      *hw_accelerated = FALSE;
+  for (i = 0; i < gst_caps_get_size (caps) && ret == FALSE; i++) {
+    name = gst_structure_get_name (gst_caps_get_structure (caps, i));
+    if (g_str_equal (name, "video/x-raw")) {
+      ret = TRUE;
+      if (hw_accelerated)
+        *hw_accelerated = FALSE;
 
-  } else if (g_str_has_prefix (name, "video/x-surface")) {
-    ret = TRUE;
-    if (hw_accelerated)
-      *hw_accelerated = TRUE;
-  } else {
+    } else if (g_str_has_prefix (name, "video/x-surface")) {
+      ret = TRUE;
+      if (hw_accelerated)
+        *hw_accelerated = TRUE;
+    } else {
 
-    ret = FALSE;
-    if (hw_accelerated)
-      *hw_accelerated = FALSE;
+      ret = FALSE;
+      if (hw_accelerated)
+        *hw_accelerated = FALSE;
+    }
   }
 
   gst_caps_unref (caps);

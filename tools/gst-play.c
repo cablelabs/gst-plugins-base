@@ -1,6 +1,6 @@
 /* GStreamer command line playback testing utility
  *
- * Copyright (C) 2013 Tim-Philipp Müller <tim centricular net>
+ * Copyright (C) 2013-2014 Tim-Philipp Müller <tim centricular net>
  * Copyright (C) 2013 Collabora Ltd.
  *
  * This library is free software; you can redistribute it and/or
@@ -27,12 +27,16 @@
 
 #include <gst/gst.h>
 #include <gst/gst-i18n-app.h>
+#include <gst/audio/audio.h>
 #include <gst/pbutils/pbutils.h>
+#include <gst/math-compat.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "gst-play-kb.h"
+
+#define VOLUME_STEPS 20
 
 GST_DEBUG_CATEGORY (play_debug);
 #define GST_CAT_DEFAULT play_debug
@@ -67,10 +71,11 @@ static gboolean play_prev (GstPlay * play);
 static gboolean play_timeout (gpointer user_data);
 static void play_about_to_finish (GstElement * playbin, gpointer user_data);
 static void play_reset (GstPlay * play);
+static void play_set_relative_volume (GstPlay * play, gdouble volume_step);
 
 static GstPlay *
 play_new (gchar ** uris, const gchar * audio_sink, const gchar * video_sink,
-    gboolean gapless)
+    gboolean gapless, gdouble initial_volume)
 {
   GstElement *sink;
   GstPlay *play;
@@ -126,6 +131,8 @@ play_new (gchar ** uris, const gchar * audio_sink, const gchar * video_sink,
         G_CALLBACK (play_about_to_finish), play);
   }
 
+  play_set_relative_volume (play, initial_volume - 1.0);
+
   return play;
 }
 
@@ -154,6 +161,23 @@ play_reset (GstPlay * play)
 
   play->buffering = FALSE;
   play->is_live = FALSE;
+}
+
+static void
+play_set_relative_volume (GstPlay * play, gdouble volume_step)
+{
+  gdouble volume;
+
+  volume = gst_stream_volume_get_volume (GST_STREAM_VOLUME (play->playbin),
+      GST_STREAM_VOLUME_FORMAT_LINEAR);
+
+  volume = round ((volume + volume_step) * VOLUME_STEPS) / VOLUME_STEPS;
+  volume = CLAMP (volume, 0.0, 10.0);
+
+  gst_stream_volume_set_volume (GST_STREAM_VOLUME (play->playbin),
+      GST_STREAM_VOLUME_FORMAT_LINEAR, volume);
+
+  g_print ("Volume: %.0f%%                  \n", volume * 100);
 }
 
 /* returns TRUE if something was installed and we should restart playback */
@@ -193,20 +217,19 @@ play_bus_msg (GstBus * bus, GstMessage * msg, gpointer user_data)
       gst_message_parse_buffering (msg, &percent);
       g_print ("%s %d%%  \r", _("Buffering..."), percent);
 
-      /* no state management needed for live pipelines */
-      if (play->is_live)
-        break;
-
       if (percent == 100) {
         /* a 100% message means buffering is done */
         if (play->buffering) {
           play->buffering = FALSE;
-          gst_element_set_state (play->playbin, play->desired_state);
+          /* no state management needed for live pipelines */
+          if (!play->is_live)
+            gst_element_set_state (play->playbin, play->desired_state);
         }
       } else {
         /* buffering... */
         if (!play->buffering) {
-          gst_element_set_state (play->playbin, GST_STATE_PAUSED);
+          if (!play->is_live)
+            gst_element_set_state (play->playbin, GST_STATE_PAUSED);
           play->buffering = TRUE;
         }
       }
@@ -373,7 +396,7 @@ play_uri (GstPlay * play, const gchar * next_uri)
 
   g_object_set (play->playbin, "uri", next_uri, NULL);
 
-  sret = gst_element_set_state (play->playbin, play->desired_state);
+  sret = gst_element_set_state (play->playbin, GST_STATE_PAUSED);
   switch (sret) {
     case GST_STATE_CHANGE_FAILURE:
       /* ignore, we should get an error message posted on the bus */
@@ -388,6 +411,8 @@ play_uri (GstPlay * play, const gchar * next_uri)
     default:
       break;
   }
+  if (play->desired_state != GST_STATE_PAUSED)
+    sret = gst_element_set_state (play->playbin, play->desired_state);
 }
 
 /* returns FALSE if we have reached the end of the playlist */
@@ -603,6 +628,10 @@ keyboard_cb (const gchar * key_input, gpointer user_data)
         relative_seek (play, +0.08);
       } else if (strcmp (key_input, GST_PLAY_KB_ARROW_LEFT) == 0) {
         relative_seek (play, -0.01);
+      } else if (strcmp (key_input, GST_PLAY_KB_ARROW_UP) == 0) {
+        play_set_relative_volume (play, +1.0 / VOLUME_STEPS);
+      } else if (strcmp (key_input, GST_PLAY_KB_ARROW_DOWN) == 0) {
+        play_set_relative_volume (play, -1.0 / VOLUME_STEPS);
       } else {
         GST_INFO ("keyboard input:");
         for (; *key_input != '\0'; ++key_input)
@@ -621,6 +650,7 @@ main (int argc, char **argv)
   gboolean interactive = FALSE; /* FIXME: maybe enable by default? */
   gboolean gapless = FALSE;
   gboolean shuffle = FALSE;
+  gdouble volume = 1.0;
   gchar **filenames = NULL;
   gchar *audio_sink = NULL;
   gchar *video_sink = NULL;
@@ -640,7 +670,9 @@ main (int argc, char **argv)
     {"shuffle", 0, 0, G_OPTION_ARG_NONE, &shuffle,
         N_("Shuffle playlist"), NULL},
     {"interactive", 0, 0, G_OPTION_ARG_NONE, &interactive,
-        N_("interactive"), NULL},
+        N_("Interactive control via keyboard"), NULL},
+    {"volume", 0, 0, G_OPTION_ARG_DOUBLE, &volume,
+        N_("Volume"), NULL},
     {G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &filenames, NULL},
     {NULL}
   };
@@ -705,7 +737,7 @@ main (int argc, char **argv)
     shuffle_uris (uris, num);
 
   /* prepare */
-  play = play_new (uris, audio_sink, video_sink, gapless);
+  play = play_new (uris, audio_sink, video_sink, gapless, volume);
 
   if (interactive) {
     if (gst_play_kb_set_key_handler (keyboard_cb, play)) {

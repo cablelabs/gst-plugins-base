@@ -913,6 +913,9 @@ gst_video_decoder_push_event (GstVideoDecoder * decoder, GstEvent * event)
       break;
   }
 
+  GST_DEBUG_OBJECT (decoder, "pushing event %s",
+      gst_event_type_get_name (GST_EVENT_TYPE (event)));
+
   return gst_pad_push_event (decoder->srcpad, event);
 }
 
@@ -960,14 +963,14 @@ gst_video_decoder_drain_out (GstVideoDecoder * dec, gboolean at_eos)
     if (!priv->packetized) {
       ret = gst_video_decoder_parse_available (dec, TRUE, FALSE);
     }
+
+    if (at_eos) {
+      if (decoder_class->finish)
+        ret = decoder_class->finish (dec);
+    }
   } else {
     /* Reverse playback mode */
     ret = gst_video_decoder_flush_parse (dec, TRUE);
-  }
-
-  if (at_eos) {
-    if (decoder_class->finish)
-      ret = decoder_class->finish (dec);
   }
 
   GST_VIDEO_DECODER_STREAM_UNLOCK (dec);
@@ -1847,9 +1850,6 @@ gst_video_decoder_flush_decode (GstVideoDecoder * dec)
 
   GST_DEBUG_OBJECT (dec, "flushing buffers to decode");
 
-  /* clear buffer and decoder state */
-  gst_video_decoder_flush (dec, FALSE);
-
   walk = priv->decode;
   while (walk) {
     GList *next;
@@ -1888,6 +1888,9 @@ gst_video_decoder_flush_parse (GstVideoDecoder * dec, gboolean at_eos)
   GstVideoDecoderPrivate *priv = dec->priv;
   GstFlowReturn res = GST_FLOW_OK;
   GList *walk;
+  GstVideoDecoderClass *decoder_class;
+
+  decoder_class = GST_VIDEO_DECODER_GET_CLASS (dec);
 
   GST_DEBUG_OBJECT (dec, "flushing buffers to parsing");
 
@@ -1925,19 +1928,10 @@ gst_video_decoder_flush_parse (GstVideoDecoder * dec, gboolean at_eos)
     walk = next;
   }
 
-  /* now we can process frames. Start by moving each frame from the parse_gather
-   * to the decode list, reverse the order as we go, and stopping when/if we
-   * copy a keyframe. */
-  GST_DEBUG_OBJECT (dec, "checking parsed frames for a keyframe to decode");
   walk = priv->parse_gather;
   while (walk) {
     GstVideoCodecFrame *frame = (GstVideoCodecFrame *) (walk->data);
-
-    /* remove from the gather list */
-    priv->parse_gather = g_list_remove_link (priv->parse_gather, walk);
-
-    /* move it to the front of the decode queue */
-    priv->decode = g_list_concat (walk, priv->decode);
+    GList *walk2;
 
     /* this is reverse playback, check if we need to apply some segment
      * to the output before decoding, as during decoding the segment.rate
@@ -1949,11 +1943,11 @@ gst_video_decoder_flush_parse (GstVideoDecoder * dec, gboolean at_eos)
      * pushing a segment before caps event. Negotiation only happens
      * when finish_frame is called.
      */
-    for (walk = frame->events; walk;) {
-      GList *cur = walk;
-      GstEvent *event = walk->data;
+    for (walk2 = frame->events; walk2;) {
+      GList *cur = walk2;
+      GstEvent *event = walk2->data;
 
-      walk = g_list_next (walk);
+      walk2 = g_list_next (walk2);
       if (GST_EVENT_TYPE (event) <= GST_EVENT_SEGMENT) {
 
         if (GST_EVENT_TYPE (event) == GST_EVENT_SEGMENT) {
@@ -1972,6 +1966,23 @@ gst_video_decoder_flush_parse (GstVideoDecoder * dec, gboolean at_eos)
       }
     }
 
+    walk = walk->next;
+  }
+
+  /* now we can process frames. Start by moving each frame from the parse_gather
+   * to the decode list, reverse the order as we go, and stopping when/if we
+   * copy a keyframe. */
+  GST_DEBUG_OBJECT (dec, "checking parsed frames for a keyframe to decode");
+  walk = priv->parse_gather;
+  while (walk) {
+    GstVideoCodecFrame *frame = (GstVideoCodecFrame *) (walk->data);
+
+    /* remove from the gather list */
+    priv->parse_gather = g_list_remove_link (priv->parse_gather, walk);
+
+    /* move it to the front of the decode queue */
+    priv->decode = g_list_concat (walk, priv->decode);
+
     /* if we copied a keyframe, flush and decode the decode queue */
     if (GST_VIDEO_CODEC_FRAME_IS_SYNC_POINT (frame)) {
       GST_DEBUG_OBJECT (dec, "found keyframe %p with PTS %" GST_TIME_FORMAT
@@ -1985,6 +1996,14 @@ gst_video_decoder_flush_parse (GstVideoDecoder * dec, gboolean at_eos)
 
     walk = priv->parse_gather;
   }
+
+  /* We need to tell the subclass to drain now */
+  GST_DEBUG_OBJECT (dec, "Finishing");
+  if (decoder_class->finish)
+    res = decoder_class->finish (dec);
+
+  if (res != GST_FLOW_OK)
+    goto done;
 
   /* now send queued data downstream */
   walk = priv->output_queued;
@@ -2242,6 +2261,7 @@ gst_video_decoder_new_frame (GstVideoDecoder * decoder)
   frame->duration = GST_CLOCK_TIME_NONE;
   frame->events = priv->current_frame_events;
   priv->current_frame_events = NULL;
+
   GST_VIDEO_DECODER_STREAM_UNLOCK (decoder);
 
   GST_LOG_OBJECT (decoder, "Created new frame %p (sfn:%d)",
@@ -3230,7 +3250,12 @@ gst_video_decoder_negotiate_pool (GstVideoDecoder * decoder, GstCaps * caps)
   decoder->priv->params = params;
 
   if (decoder->priv->pool) {
-    gst_buffer_pool_set_active (decoder->priv->pool, FALSE);
+    /* do not set the bufferpool to inactive here, it will be done
+     * on its finalize function. As videodecoder do late renegotiation
+     * it might happen that some element downstream is already using this
+     * same bufferpool and deactivating it will make it fail.
+     * Happens when a downstream element changes from passthrough to
+     * non-passthrough and gets this same bufferpool to use */
     gst_object_unref (decoder->priv->pool);
   }
   decoder->priv->pool = pool;

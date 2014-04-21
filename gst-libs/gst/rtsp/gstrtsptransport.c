@@ -273,7 +273,7 @@ gst_rtsp_transport_get_mime (GstRTSPTransMode trans, const gchar ** mime)
 /**
  * gst_rtsp_transport_get_media_type:
  * @transport: a #GstRTSPTransport
- * @mime: location to hold the result
+ * @media_type: (out): media type of @transport
  *
  * Get the media type of @transport. This media type is typically
  * used to generate #GstCaps events.
@@ -655,7 +655,10 @@ gst_rtsp_transport_as_text (GstRTSPTransport * transport)
   g_ptr_array_add (strs, g_ascii_strup (tmp, -1));
 
   if (transport->trans != GST_RTSP_TRANS_RTP ||
-      transport->profile != GST_RTSP_PROFILE_AVP ||
+      (transport->profile != GST_RTSP_PROFILE_AVP &&
+          transport->profile != GST_RTSP_PROFILE_SAVP &&
+          transport->profile != GST_RTSP_PROFILE_AVPF &&
+          transport->profile != GST_RTSP_PROFILE_SAVPF) ||
       transport->lower_transport == GST_RTSP_LOWER_TRANS_TCP) {
     g_ptr_array_add (strs, g_strdup ("/"));
 

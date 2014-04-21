@@ -183,7 +183,7 @@ gst_rtp_base_payload_class_init (GstRTPBasePayloadClass * klass)
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_PT,
       g_param_spec_uint ("pt", "payload type",
-          "The payload type of the packets", 0, 0x80, DEFAULT_PT,
+          "The payload type of the packets", 0, 0x7f, DEFAULT_PT,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_SSRC,
       g_param_spec_uint ("ssrc", "SSRC",
@@ -287,6 +287,26 @@ gst_rtp_base_payload_class_init (GstRTPBasePayloadClass * klass)
    *     <term>timestamp</term>
    *     <listitem><para>#G_TYPE_UINT, RTP timestamp, same as
    *     #GstRTPBasePayload:timestamp</para></listitem>
+   *   </varlistentry>
+   *   <varlistentry>
+   *     <term>ssrc</term>
+   *     <listitem><para>#G_TYPE_UINT, The SSRC in use
+   *     </para></listitem>
+   *   </varlistentry>
+   *   <varlistentry>
+   *     <term>pt</term>
+   *     <listitem><para>#G_TYPE_UINT, The Payload type in use, same as
+   *     #GstRTPBasePayload:pt</para></listitem>
+   *   </varlistentry>
+   *   <varlistentry>
+   *     <term>seqnum-offset</term>
+   *     <listitem><para>#G_TYPE_UINT, The current offset added to the
+   *     seqnum</para></listitem>
+   *   </varlistentry>
+   *   <varlistentry>
+   *     <term>timestamp-offset</term>
+   *     <listitem><para>#G_TYPE_UINT, The current offset added to the
+   *     timestamp</para></listitem>
    *   </varlistentry>
    * </variablelist>
    **/
@@ -823,6 +843,9 @@ gst_rtp_base_payload_set_outcaps (GstRTPBasePayload * payload,
       payload->seqnum_base = g_value_get_uint (value);
       GST_LOG_OBJECT (payload, "using peer seqnum-offset %u",
           payload->seqnum_base);
+      payload->priv->next_seqnum = payload->seqnum_base;
+      payload->seqnum = payload->seqnum_base;
+      payload->priv->seqnum_offset_random = FALSE;
     } else {
       /* FIXME, fixate_nearest_uint would be even better */
       gst_structure_set (s, "seqnum-offset", G_TYPE_UINT, payload->seqnum_base,
@@ -1015,7 +1038,8 @@ gst_rtp_base_payload_prepare_push (GstRTPBasePayload * payload,
       priv->running_time = rtime_hz;
     } else {
       GST_LOG_OBJECT (payload,
-          "setting running-time to %" GST_TIME_FORMAT, GST_TIME_ARGS (rtime_ns));
+          "setting running-time to %" GST_TIME_FORMAT,
+          GST_TIME_ARGS (rtime_ns));
       priv->running_time = rtime_ns;
     }
   } else {
@@ -1041,8 +1065,8 @@ gst_rtp_base_payload_prepare_push (GstRTPBasePayload * payload,
       (is_list) ? -1 : gst_buffer_get_size (GST_BUFFER (obj)),
       payload->seqnum, data.rtptime, GST_TIME_ARGS (data.pts));
 
-  if (g_atomic_int_compare_and_exchange (&payload->priv->
-          notified_first_timestamp, 1, 0)) {
+  if (g_atomic_int_compare_and_exchange (&payload->
+          priv->notified_first_timestamp, 1, 0)) {
     g_object_notify (G_OBJECT (payload), "timestamp");
     g_object_notify (G_OBJECT (payload), "seqnum");
   }
@@ -1126,7 +1150,7 @@ gst_rtp_base_payload_push (GstRTPBasePayload * payload, GstBuffer * buffer)
 }
 
 static GstStructure *
-gst_rtp_base_payload_create_stats (GstRTPBasePayload *rtpbasepayload)
+gst_rtp_base_payload_create_stats (GstRTPBasePayload * rtpbasepayload)
 {
   GstRTPBasePayloadPrivate *priv;
   GstStructure *s;
@@ -1134,11 +1158,14 @@ gst_rtp_base_payload_create_stats (GstRTPBasePayload *rtpbasepayload)
   priv = rtpbasepayload->priv;
 
   s = gst_structure_new ("application/x-rtp-payload-stats",
-    "clock-rate", G_TYPE_UINT, rtpbasepayload->clock_rate,
-    "running-time", G_TYPE_UINT64, priv->running_time,
-    "seqnum", G_TYPE_UINT, rtpbasepayload->seqnum,
-    "timestamp", G_TYPE_UINT, rtpbasepayload->timestamp,
-    NULL);
+      "clock-rate", G_TYPE_UINT, (guint) rtpbasepayload->clock_rate,
+      "running-time", G_TYPE_UINT64, priv->running_time,
+      "seqnum", G_TYPE_UINT, (guint) rtpbasepayload->seqnum,
+      "timestamp", G_TYPE_UINT, (guint) rtpbasepayload->timestamp,
+      "ssrc", G_TYPE_UINT, rtpbasepayload->current_ssrc,
+      "pt", G_TYPE_UINT, rtpbasepayload->pt,
+      "seqnum-offset", G_TYPE_UINT, (guint) rtpbasepayload->seqnum_base,
+      "timestamp-offset", G_TYPE_UINT, (guint) rtpbasepayload->ts_base, NULL);
 
   return s;
 }

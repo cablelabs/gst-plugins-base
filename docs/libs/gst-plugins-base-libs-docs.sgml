@@ -140,6 +140,16 @@
       <xi:include href="xml/gstsdpmessage.xml" />
     </chapter>
 
+    <chapter id="gstreamer-mikey">
+      <title>MIKEY Library</title>
+      <para>
+        This library should be linked to by getting cflags and libs from
+        <filename>gstreamer-plugins-base-&GST_API_VERSION;.pc</filename> and adding
+        <filename>-lgstsdp-&GST_API_VERSION;</filename> to the library flags.
+      </para>
+      <xi:include href="xml/gstmikey.xml" />
+    </chapter>
+
     <chapter id="gstreamer-tag">
       <title>Tag Support Library</title>
       <para>
@@ -195,6 +205,7 @@
       <xi:include href="xml/gstvideooverlay.xml" />
       <xi:include href="xml/gstvideodecoder.xml" />
       <xi:include href="xml/gstvideoencoder.xml" />
+      <xi:include href="xml/gstvideopool.xml" />
       <xi:include href="xml/gstvideoutils.xml" />
     </chapter>
   </part>

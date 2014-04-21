@@ -517,7 +517,7 @@ xml_check_first_element_from_data (const guint8 * data, guint length,
 
   /* look for the first element, it has to be the requested element. Bail
    * out if it is not within the first 4kB. */
-  while (data && pos < MIN (4096, length)) {
+  while (pos < MIN (4096, length)) {
     while (*data != '<' && pos < MIN (4096, length)) {
       XML_INC_BUFFER_DATA;
     }
@@ -533,7 +533,7 @@ xml_check_first_element_from_data (const guint8 * data, guint length,
     /* the first normal element, check if it's the one asked for */
     if (pos + elen + 1 >= length)
       return FALSE;
-    return (data && element && strncmp ((char *) data, element, elen) == 0);
+    return (element && strncmp ((const char *) data, element, elen) == 0);
   }
 
   return FALSE;
@@ -2587,9 +2587,9 @@ h263_video_type_find (GstTypeFind * tf, gpointer unused)
     data_scan_ctx_advance (tf, &c, 1);
   }
 
-  if (good > 0 && bad == 0)
-    gst_type_find_suggest (tf, GST_TYPE_FIND_LIKELY, H263_VIDEO_CAPS);
-  else if (good > 2 * bad)
+  GST_LOG ("good: %d, bad: %d", good, bad);
+
+  if (good > 2 * bad)
     gst_type_find_suggest (tf, GST_TYPE_FIND_POSSIBLE, H263_VIDEO_CAPS);
 
   return;

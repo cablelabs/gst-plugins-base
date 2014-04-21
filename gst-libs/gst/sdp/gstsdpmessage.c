@@ -436,7 +436,10 @@ gst_sdp_address_is_multicast (const gchar * nettype, const gchar * addrtype,
   if (nettype && strcmp (nettype, "IN") != 0)
     return FALSE;
 
-  iaddr = g_inet_address_new_from_string (addr);
+  /* guard against parse failures */
+  if ((iaddr = g_inet_address_new_from_string (addr)) == NULL)
+    return FALSE;
+
   ret = g_inet_address_get_is_multicast (iaddr);
   g_object_unref (iaddr);
 
@@ -692,7 +695,7 @@ static const gchar hex[16] = "0123456789ABCDEF";
  *
  * Creates a uri from @msg with the given @scheme. The uri has the format:
  *
- *  @scheme:///[#type=value *[&type=value]]
+ *  \@scheme:///[#type=value *[&type=value]]
  *
  *  Where each value is url encoded.
  *
@@ -2793,8 +2796,10 @@ gst_sdp_parse_line (SDPContext * c, gchar type, gchar * buffer)
   gchar str[8192];
   gchar *p = buffer;
 
-#define READ_STRING(field) read_string (str, sizeof (str), &p); REPLACE_STRING (field, str)
-#define READ_UINT(field) read_string (str, sizeof (str), &p); field = strtoul (str, NULL, 10)
+#define READ_STRING(field) \
+  do { read_string (str, sizeof (str), &p); REPLACE_STRING (field, str); } while (0)
+#define READ_UINT(field) \
+  do { read_string (str, sizeof (str), &p); field = strtoul (str, NULL, 10); } while (0)
 
   switch (type) {
     case 'v':
